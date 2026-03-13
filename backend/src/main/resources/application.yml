@@ -1,0 +1,31 @@
+server:
+  port: 8080
+
+evoforge:
+  skills:
+    storage: data/skills.json
+    auditStorage: data/skill-audit.json
+    historyStorage: data/skill-history.json
+    autoReloadSeconds: 5
+    maxCodeSize: 0
+    bannedPatterns: []
+    sandboxEnabled: false
+    allowedImports:
+      - com.evoforge.skills.Skill
+      - com.evoforge.model.SkillContext
+      - com.evoforge.model.SkillResult
+    allowedStarImports:
+      - java.util.*
+      - java.time.*
+    disallowedImports: []
+    routerUseLlm: false
+    routerMinConfidence: 0.4
+  models:
+    defaultLlm: mock-llm
+    defaultCodeModel: mock-code
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

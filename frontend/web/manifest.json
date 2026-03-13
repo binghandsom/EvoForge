@@ -1,0 +1,9 @@
+{
+  "name": "EvoForge Web Console",
+  "short_name": "EvoForge",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3f51b5",
+  "description": "EvoForge Web Console"
+}
