@@ -6,6 +6,7 @@ class DeviceCommandFactory {
   final String deviceId;
   final String commandExchange;
   final String? commandRoutingKey;
+  final String? clientRequestRoutingKey;
   final DeviceCommandSigner signer;
   final DateTime Function() clock;
   final String Function() idFactory;
@@ -16,6 +17,7 @@ class DeviceCommandFactory {
     required this.signer,
     this.commandExchange = 'evoforge.commands',
     this.commandRoutingKey,
+    this.clientRequestRoutingKey,
     DateTime Function()? clock,
     String Function()? idFactory,
   })  : clock = clock ?? (() => DateTime.now().toUtc()),
@@ -78,6 +80,28 @@ class DeviceCommandFactory {
     );
   }
 
+  DeviceCommandEnvelope clientRequest({
+    required String method,
+    Map<String, Object?> params = const {},
+    String? taskId,
+    String? requestId,
+  }) {
+    final id = requestId ?? taskId ?? idFactory();
+    return _command(
+      type: DeviceCommandType.clientRequest,
+      taskId: taskId ?? id,
+      requiresApproval: false,
+      routingKey: clientRequestRoutingKey,
+      attributes: {
+        'request': {
+          'requestId': id,
+          'method': method,
+          'params': params,
+        },
+      },
+    );
+  }
+
   DeviceCommandEnvelope _command({
     required String type,
     String? text,
@@ -86,6 +110,7 @@ class DeviceCommandFactory {
     String? skillId,
     String? llm,
     String? codeModel,
+    String? routingKey,
     Map<String, Object?> attributes = const {},
   }) {
     final command = <String, Object?>{
@@ -105,7 +130,9 @@ class DeviceCommandFactory {
 
     return DeviceCommandEnvelope(
       exchange: commandExchange,
-      routingKey: commandRoutingKey ?? 'user.$userId.device.$deviceId.command',
+      routingKey: routingKey ??
+          commandRoutingKey ??
+          'user.$userId.device.$deviceId.command',
       payload: signer.sign(command),
     );
   }

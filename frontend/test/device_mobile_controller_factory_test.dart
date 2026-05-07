@@ -17,6 +17,7 @@ void main() {
       deviceId: 'pc-1',
       commandExchange: 'evoforge.commands',
       commandRoutingKey: 'user.user-1.device.pc-1.command',
+      requestRoutingKey: 'user.user-1.device.pc-1.request',
       eventExchange: 'evoforge.events',
       eventRoutingKey: 'user.user-1.device.pc-1.event',
       eventQueue: 'evoforge.device.pc-1.events',

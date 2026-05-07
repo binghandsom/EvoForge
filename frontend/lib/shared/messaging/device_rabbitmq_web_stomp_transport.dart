@@ -22,6 +22,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
       StreamController<Object>.broadcast();
   final DeviceStompFrameParser _parser = DeviceStompFrameParser();
   final Completer<void> _connected = Completer<void>();
+  final Completer<void> _subscribed = Completer<void>();
   late final StreamSubscription<Object?> _subscription;
   bool _streamsClosed = false;
 
@@ -98,11 +99,14 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
 
   Future<void> get connected => _connected.future;
 
+  Future<void> get subscribed => _subscribed.future;
+
   Stream<Object> get protocolErrors => _protocolErrors.stream;
 
   @override
   Future<void> publish(DeviceCommandEnvelope envelope) async {
     await connected;
+    await subscribed;
     await _sendFrame(DeviceStompFrame(
       command: 'SEND',
       headers: {
@@ -140,8 +144,8 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     ));
   }
 
-  Future<void> _sendSubscribe() {
-    return _sendFrame(DeviceStompFrame(
+  Future<void> _sendSubscribe() async {
+    await _sendFrame(DeviceStompFrame(
       command: 'SUBSCRIBE',
       headers: {
         'id': subscriptionId,
@@ -150,6 +154,9 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
         ...subscribeHeaders,
       },
     ));
+    if (!_subscribed.isCompleted) {
+      _subscribed.complete();
+    }
   }
 
   Future<void> _sendFrame(DeviceStompFrame frame) {
@@ -183,6 +190,9 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
         if (!_connected.isCompleted) {
           _connected.completeError(error);
         }
+        if (!_subscribed.isCompleted) {
+          _subscribed.completeError(error);
+        }
         _protocolErrors.add(error);
       default:
         break;
@@ -205,14 +215,19 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     if (!_connected.isCompleted) {
       _connected.completeError(error);
     }
+    if (!_subscribed.isCompleted) {
+      _subscribed.completeError(error);
+    }
     _protocolErrors.add(error);
   }
 
   void _handleSocketDone() {
+    const error = DeviceStompProtocolException('RabbitMQ STOMP socket closed');
     if (!_connected.isCompleted) {
-      _connected.completeError(
-        const DeviceStompProtocolException('RabbitMQ STOMP socket closed'),
-      );
+      _connected.completeError(error);
+    }
+    if (!_subscribed.isCompleted) {
+      _subscribed.completeError(error);
     }
     unawaited(_closeStreams());
   }

@@ -106,6 +106,14 @@ class MobileConnectionRuntimeConfig {
   final String commandSigningSecret;
   final String eventSigningSecret;
   final bool subscribeToDedicatedQueue;
+  final String userId;
+  final String deviceId;
+  final String commandExchange;
+  final String? commandRoutingKey;
+  final String? requestRoutingKey;
+  final String eventExchange;
+  final String? eventRoutingKey;
+  final String? eventQueue;
 
   const MobileConnectionRuntimeConfig({
     required this.transportKind,
@@ -116,6 +124,14 @@ class MobileConnectionRuntimeConfig {
     this.commandSigningSecret = '',
     this.eventSigningSecret = '',
     this.subscribeToDedicatedQueue = false,
+    this.userId = 'local-user',
+    this.deviceId = 'local-pc',
+    this.commandExchange = 'evoforge.commands',
+    this.commandRoutingKey,
+    this.requestRoutingKey,
+    this.eventExchange = 'evoforge.events',
+    this.eventRoutingKey,
+    this.eventQueue,
   });
 
   factory MobileConnectionRuntimeConfig.empty() {
@@ -147,6 +163,57 @@ class MobileConnectionRuntimeConfig {
       commandSigningSecret: json['commandSigningSecret']?.toString() ?? '',
       eventSigningSecret: json['eventSigningSecret']?.toString() ?? '',
       subscribeToDedicatedQueue: json['subscribeToDedicatedQueue'] == true,
+      userId: json['userId']?.toString() ?? 'local-user',
+      deviceId: json['deviceId']?.toString() ?? 'local-pc',
+      commandExchange:
+          json['commandExchange']?.toString() ?? 'evoforge.commands',
+      commandRoutingKey: json['commandRoutingKey']?.toString(),
+      requestRoutingKey: json['requestRoutingKey']?.toString(),
+      eventExchange: json['eventExchange']?.toString() ?? 'evoforge.events',
+      eventRoutingKey: json['eventRoutingKey']?.toString(),
+      eventQueue: json['eventQueue']?.toString(),
+    );
+  }
+
+  DeviceMobileConnectionConfig toDirectDeviceConnection() {
+    final resolvedUri = uri ?? Uri();
+    final commandRoute =
+        commandRoutingKey ?? 'user.$userId.device.$deviceId.command';
+    final requestRoute =
+        requestRoutingKey ?? 'user.$userId.device.$deviceId.request';
+    final eventRoute = eventRoutingKey ?? 'user.$userId.device.$deviceId.event';
+    final queue = eventQueue ?? 'evoforge.device.$deviceId.events';
+    if (transportKind == DeviceMobileTransportKind.jsonRelay) {
+      return DeviceMobileConnectionConfig.jsonRelay(
+        uri: resolvedUri,
+        userId: userId,
+        deviceId: deviceId,
+        commandExchange: commandExchange,
+        commandRoutingKey: commandRoute,
+        requestRoutingKey: requestRoute,
+        eventExchange: eventExchange,
+        eventRoutingKey: eventRoute,
+        eventQueue: queue,
+        commandSigningSecret: commandSigningSecret,
+        eventSigningSecret: eventSigningSecret,
+      );
+    }
+    return DeviceMobileConnectionConfig.rabbitMqWebStomp(
+      uri: resolvedUri,
+      userId: userId,
+      deviceId: deviceId,
+      commandExchange: commandExchange,
+      commandRoutingKey: commandRoute,
+      requestRoutingKey: requestRoute,
+      eventExchange: eventExchange,
+      eventRoutingKey: eventRoute,
+      eventQueue: queue,
+      login: rabbitMqLogin,
+      passcode: rabbitMqPasscode,
+      virtualHost: rabbitMqVirtualHost,
+      commandSigningSecret: commandSigningSecret,
+      eventSigningSecret: eventSigningSecret,
+      subscribeToDedicatedQueue: subscribeToDedicatedQueue,
     );
   }
 

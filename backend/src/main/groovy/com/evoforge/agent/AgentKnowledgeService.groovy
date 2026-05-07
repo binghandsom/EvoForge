@@ -12,6 +12,12 @@ class AgentKnowledgeService {
         this.store = store
     }
 
+    Optional<AgentKnowledgeFact> findByKey(String key, String scope = 'global') {
+        String normalizedKey = required(key, 'key')
+        String normalizedScope = text(scope) ?: 'global'
+        return store.findByKey(normalizedKey, normalizedScope)
+    }
+
     List<AgentKnowledgeFact> search(String query, int limit = 8) {
         String normalized = (query ?: '').toLowerCase(Locale.ROOT).trim()
         int safeLimit = Math.max(1, Math.min(limit, 50))
@@ -57,7 +63,7 @@ class AgentKnowledgeService {
         String key = fact.key?.toLowerCase(Locale.ROOT) ?: ''
         String value = fact.value?.toLowerCase(Locale.ROOT) ?: ''
         String tags = (fact.tags ?: []).join(' ').toLowerCase(Locale.ROOT)
-        query.split(/[^a-z0-9\u4e00-\u9fff._/-]+/).findAll { it }.each { token ->
+        query.split('[^a-z0-9\\u4e00-\\u9fff._/-]+').findAll { it }.each { token ->
             if (key.contains(token)) score += 5
             if (tags.contains(token)) score += 3
             if (value.contains(token)) score += 1

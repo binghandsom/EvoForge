@@ -1,6 +1,7 @@
 package com.evoforge.device
 
 import com.evoforge.api.AgentRequest
+import com.evoforge.agent.ProjectLearningService
 import com.evoforge.core.AgentService
 import com.evoforge.core.EvoForgeProperties
 import org.slf4j.Logger
@@ -13,19 +14,25 @@ class DeviceAgentExecutor {
 
     private final AgentService agentService
     private final CodexTaskExecutor codexTaskExecutor
+    private final ClientRequestService clientRequestService
     private final DeviceTaskApprovalService approvalService
     private final DeviceEventPublisher eventPublisher
+    private final ProjectLearningService projectLearningService
     private final EvoForgeProperties properties
 
     DeviceAgentExecutor(AgentService agentService,
                         CodexTaskExecutor codexTaskExecutor,
+                        ClientRequestService clientRequestService,
                         DeviceTaskApprovalService approvalService,
                         DeviceEventPublisher eventPublisher,
+                        ProjectLearningService projectLearningService,
                         EvoForgeProperties properties) {
         this.agentService = agentService
         this.codexTaskExecutor = codexTaskExecutor
+        this.clientRequestService = clientRequestService
         this.approvalService = approvalService
         this.eventPublisher = eventPublisher
+        this.projectLearningService = projectLearningService
         this.properties = properties
     }
 
@@ -73,6 +80,10 @@ class DeviceAgentExecutor {
 
         try {
             publish(normalized, DeviceProtocol.STATUS_RUNNING, DeviceProtocol.STATUS_RUNNING, 'info', 'Agent execution started', null, [:], false)
+            if (normalized.type == DeviceProtocol.TYPE_CLIENT_REQUEST) {
+                runClientRequest(normalized)
+                return
+            }
             if (normalized.type == DeviceProtocol.TYPE_CODEX_TASK) {
                 runCodexTask(normalized)
                 return
@@ -103,7 +114,7 @@ class DeviceAgentExecutor {
                 'error',
                 ex.message ?: ex.class.simpleName,
                 null,
-                [errorType: ex.class.name],
+                failurePayload(normalized, ex),
                 true
             )
         }
@@ -111,6 +122,7 @@ class DeviceAgentExecutor {
 
     private void runCodexTask(DeviceCommandMessage command) {
         CodexTaskResult result = codexTaskExecutor.execute(command)
+        Map<String, Object> learning = projectLearningService.recordCodexTask(command, result)
         String level = result.status == DeviceProtocol.STATUS_FAILED ? 'error' : result.status == DeviceProtocol.STATUS_NEEDS_APPROVAL ? 'warn' : 'info'
         publish(
             command,
@@ -119,8 +131,26 @@ class DeviceAgentExecutor {
             level,
             result.message,
             result.output,
-            [commandType: command.type],
+            [
+                commandType    : command.type,
+                projectKey     : command.attributes?.projectKey,
+                projectLearning: learning?.enabled == true ? learning : null
+            ].findAll { it.value != null } as Map<String, Object>,
             result.recoverable
+        )
+    }
+
+    private void runClientRequest(DeviceCommandMessage command) {
+        Map<String, Object> response = clientRequestService.handle(command)
+        publish(
+            command,
+            DeviceProtocol.STATUS_CLIENT_RESPONSE,
+            DeviceProtocol.STATUS_COMPLETED,
+            'info',
+            "Client request completed: ${response.method}".toString(),
+            null,
+            [clientResponse: response],
+            false
         )
     }
 
@@ -177,6 +207,20 @@ class DeviceAgentExecutor {
         attributes.userId = command.userId
         attributes.deviceId = command.deviceId
         return attributes
+    }
+
+    private static Map<String, Object> failurePayload(DeviceCommandMessage command, Exception ex) {
+        Map<String, Object> payload = [errorType: ex.class.name] as Map<String, Object>
+        if (command.type == DeviceProtocol.TYPE_CLIENT_REQUEST) {
+            Map request = command.attributes?.request instanceof Map ? command.attributes.request as Map : command.attributes ?: [:]
+            payload.clientResponse = [
+                requestId: request.requestId ?: command.taskId,
+                method   : request.method ?: '',
+                ok       : false,
+                error    : ex.message ?: ex.class.simpleName
+            ]
+        }
+        return payload
     }
 
     private DeviceTaskEvent publish(DeviceCommandMessage command,

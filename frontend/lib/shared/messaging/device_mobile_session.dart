@@ -81,6 +81,16 @@ class DeviceMobileSession {
     );
   }
 
+  DeviceCommandEnvelope sendClientRequest({
+    required String method,
+    Map<String, Object?> params = const {},
+  }) {
+    return commandFactory.clientRequest(
+      method: method,
+      params: params,
+    );
+  }
+
   bool receiveEvent(DeviceTaskEvent event) {
     return inbox.add(event);
   }

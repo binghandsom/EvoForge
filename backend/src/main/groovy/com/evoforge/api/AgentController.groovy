@@ -1,6 +1,7 @@
 package com.evoforge.api
 
 import com.evoforge.agent.AgentKnowledgeService
+import com.evoforge.agent.AgentConversationMemoryService
 import com.evoforge.agent.KnowledgeSearchTool
 import com.evoforge.core.AgentService
 import com.evoforge.router.SkillRouterService
@@ -12,11 +13,16 @@ class AgentController {
     private final AgentService agentService
     private final SkillRouterService routerService
     private final AgentKnowledgeService knowledgeService
+    private final AgentConversationMemoryService conversationMemoryService
 
-    AgentController(AgentService agentService, SkillRouterService routerService, AgentKnowledgeService knowledgeService) {
+    AgentController(AgentService agentService,
+                    SkillRouterService routerService,
+                    AgentKnowledgeService knowledgeService,
+                    AgentConversationMemoryService conversationMemoryService) {
         this.agentService = agentService
         this.routerService = routerService
         this.knowledgeService = knowledgeService
+        this.conversationMemoryService = conversationMemoryService
     }
 
     @PostMapping('respond')
@@ -67,5 +73,26 @@ class AgentController {
             request.confidence instanceof Number ? request.confidence.doubleValue() : 0.7d
         )
         return KnowledgeSearchTool.toView(fact)
+    }
+
+    @GetMapping('conversations')
+    List<Map<String, Object>> conversations(@RequestParam(value = 'limit', required = false, defaultValue = '50') int limit) {
+        return conversationMemoryService.threadViews(conversationMemoryService.listThreads(limit))
+    }
+
+    @PostMapping('conversations')
+    Map<String, Object> createConversation(@RequestBody(required = false) Map<String, Object> request) {
+        def thread = conversationMemoryService.createThread(
+            request?.threadId?.toString(),
+            request?.title?.toString(),
+            request?.metadata instanceof Map ? request.metadata as Map<String, Object> : [:]
+        )
+        return conversationMemoryService.threadView(thread)
+    }
+
+    @GetMapping('conversations/{threadId}/turns')
+    List<Map<String, Object>> conversationTurns(@PathVariable('threadId') String threadId,
+                                                @RequestParam(value = 'limit', required = false, defaultValue = '100') int limit) {
+        return conversationMemoryService.toView(conversationMemoryService.recent(threadId, limit))
     }
 }

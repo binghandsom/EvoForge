@@ -1,7 +1,15 @@
 {
   "mobileConnection": {
     "transport": "rabbitmq_web_stomp",
-    "url": "wss://rabbitmq.example.com/ws",
+    "url": "ws://rabbitmq.example.com/ws",
+    "userId": "local-user",
+    "deviceId": "local-pc",
+    "commandExchange": "evoforge.commands",
+    "commandRoutingKey": "user.local-user.device.local-pc.command",
+    "requestRoutingKey": "user.local-user.device.local-pc.request",
+    "eventExchange": "evoforge.events",
+    "eventRoutingKey": "user.local-user.device.local-pc.event",
+    "eventQueue": "evoforge.device.local-pc.events",
     "login": "mobile-user",
     "passcode": "",
     "virtualHost": "evoforge",

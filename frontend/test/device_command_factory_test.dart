@@ -61,4 +61,27 @@ void main() {
     expect((envelope.payload['attributes'] as Map).containsKey('signature'),
         isFalse);
   });
+
+  test('builds client request envelope for message bus data fetches', () {
+    final factory = DeviceCommandFactory(
+      userId: 'user-1',
+      deviceId: 'pc-1',
+      signer: DeviceCommandSigner(secret: ''),
+      clock: () => DateTime.parse('2026-05-07T00:00:00Z'),
+      idFactory: () => 'request-id',
+    );
+
+    final envelope = factory.clientRequest(
+      method: 'agent.conversations.list',
+      params: {'limit': 20},
+    );
+
+    expect(envelope.type, DeviceCommandType.clientRequest);
+    expect(envelope.taskId, 'request-id');
+    final attributes = envelope.payload['attributes'] as Map;
+    final request = attributes['request'] as Map;
+    expect(request['requestId'], 'request-id');
+    expect(request['method'], 'agent.conversations.list');
+    expect((request['params'] as Map)['limit'], 20);
+  });
 }

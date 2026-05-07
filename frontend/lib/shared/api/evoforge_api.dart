@@ -6,8 +6,10 @@ import '../models/device_status.dart';
 import '../models/device_task_event.dart';
 import '../models/device_task_summary.dart';
 import '../models/device_protocol.dart';
+import '../models/agent_conversation.dart';
 import '../models/model_config.dart';
 import '../models/skill.dart';
+import '../messaging/evoforge_message_bus_client.dart';
 
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -16,8 +18,15 @@ const apiBaseUrl = String.fromEnvironment(
 
 class EvoForgeApi {
   final http.Client _client;
+  final EvoForgeMessageBusClient? messageBus;
 
-  EvoForgeApi({http.Client? client}) : _client = client ?? http.Client();
+  EvoForgeApi({http.Client? client, this.messageBus})
+      : _client = client ?? http.Client();
+
+  bool get usesMessageBus => messageBus != null;
+
+  Stream<DeviceTaskEvent> get messageBusEvents =>
+      messageBus?.events ?? const Stream<DeviceTaskEvent>.empty();
 
   Future<List<SkillView>> loadSkills() async {
     final response = await _get('/api/skills');
@@ -97,16 +106,98 @@ class EvoForgeApi {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<List<AgentConversationThread>> loadConversations({
+    int limit = 50,
+  }) async {
+    if (messageBus != null) {
+      final data = await messageBus!.request(
+        'agent.conversations.list',
+        params: {'limit': limit},
+      );
+      return (data as List<dynamic>)
+          .map((e) =>
+              AgentConversationThread.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    final response = await _get('/api/agent/conversations?limit=$limit');
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((e) => AgentConversationThread.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<AgentConversationThread> createConversation({
+    String? threadId,
+    String title = '新对话',
+  }) async {
+    if (messageBus != null) {
+      final data = await messageBus!.request(
+        'agent.conversations.create',
+        params: {
+          if (threadId != null) 'threadId': threadId,
+          'title': title,
+          'metadata': {'source': 'command-center'},
+        },
+      );
+      return AgentConversationThread.fromJson(data as Map<String, dynamic>);
+    }
+    final response = await _send('POST', '/api/agent/conversations', {
+      if (threadId != null) 'threadId': threadId,
+      'title': title,
+      'metadata': {'source': 'command-center'},
+    });
+    return AgentConversationThread.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<AgentConversationTurn>> loadConversationTurns(
+    String threadId, {
+    int limit = 100,
+  }) async {
+    if (messageBus != null) {
+      final data = await messageBus!.request(
+        'agent.conversations.turns',
+        params: {'threadId': threadId, 'limit': limit},
+      );
+      return (data as List<dynamic>)
+          .map((e) => AgentConversationTurn.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    final response =
+        await _get('/api/agent/conversations/$threadId/turns?limit=$limit');
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((e) => AgentConversationTurn.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<DeviceTaskEvent> dispatchDeviceCommand({
     required String text,
     String type = DeviceCommandType.naturalLanguageTask,
     bool requiresApproval = false,
+    Map<String, Object?> attributes = const {},
   }) async {
+    if (messageBus != null) {
+      final envelope = type == DeviceCommandType.codexTask
+          ? messageBus!.commandFactory.codexTask(
+              text: text,
+              requiresApproval: requiresApproval,
+              attributes: attributes,
+            )
+          : messageBus!.commandFactory.naturalLanguageTask(
+              text: text,
+              requiresApproval: requiresApproval,
+              attributes: attributes,
+            );
+      await messageBus!.transport.publish(envelope);
+      return _localQueuedEvent(envelope);
+    }
     final response = await _send('POST', '/api/device/commands', {
       'type': type,
       'text': text,
       'requiresApproval': requiresApproval,
-      'attributes': {},
+      'attributes': attributes,
     });
     return DeviceTaskEvent.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
@@ -114,6 +205,10 @@ class EvoForgeApi {
   }
 
   Future<DeviceStatus> loadDeviceStatus() async {
+    if (messageBus != null) {
+      final data = await messageBus!.request('device.status.get');
+      return DeviceStatus.fromJson(data as Map<String, dynamic>);
+    }
     final response = await _get('/api/device/status');
     return DeviceStatus.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
@@ -152,6 +247,15 @@ class EvoForgeApi {
   }
 
   Future<List<DeviceTaskEvent>> loadTaskEvents(String taskId) async {
+    if (messageBus != null) {
+      final data = await messageBus!.request(
+        'device.tasks.events',
+        params: {'taskId': taskId},
+      );
+      return (data as List<dynamic>)
+          .map((e) => DeviceTaskEvent.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
     final response = await _get('/api/device/tasks/$taskId/events');
     final data = jsonDecode(response.body) as List<dynamic>;
     return data
@@ -160,6 +264,15 @@ class EvoForgeApi {
   }
 
   Future<List<DeviceTaskSummary>> loadRecentTasks({int limit = 50}) async {
+    if (messageBus != null) {
+      final data = await messageBus!.request(
+        'device.tasks.list',
+        params: {'limit': limit},
+      );
+      return (data as List<dynamic>)
+          .map((e) => DeviceTaskSummary.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
     final response = await _get('/api/device/tasks?limit=$limit');
     final data = jsonDecode(response.body) as List<dynamic>;
     return data
@@ -168,6 +281,15 @@ class EvoForgeApi {
   }
 
   Future<DeviceTaskEvent> approveTask(String taskId) async {
+    if (messageBus != null) {
+      final envelope = messageBus!.commandFactory.approvalDecision(
+        taskId: taskId,
+        decision: DeviceApprovalDecision.approve,
+        actor: 'mobile',
+      );
+      await messageBus!.transport.publish(envelope);
+      return _localQueuedEvent(envelope);
+    }
     final response = await _send('POST', '/api/device/tasks/$taskId/approve', {
       'actor': 'mobile',
     });
@@ -177,6 +299,15 @@ class EvoForgeApi {
   }
 
   Future<DeviceTaskEvent> rejectTask(String taskId) async {
+    if (messageBus != null) {
+      final envelope = messageBus!.commandFactory.approvalDecision(
+        taskId: taskId,
+        decision: DeviceApprovalDecision.reject,
+        actor: 'mobile',
+      );
+      await messageBus!.transport.publish(envelope);
+      return _localQueuedEvent(envelope);
+    }
     final response = await _send('POST', '/api/device/tasks/$taskId/reject', {
       'actor': 'mobile',
     });
@@ -216,6 +347,29 @@ class EvoForgeApi {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
+  }
+
+  Future<void> close() async {
+    _client.close();
+    await messageBus?.close();
+  }
+
+  DeviceTaskEvent _localQueuedEvent(dynamic envelope) {
+    final payload = envelope.payload as Map<String, Object?>;
+    return DeviceTaskEvent(
+      eventId: 'local-${payload['commandId'] ?? payload['taskId']}',
+      taskId: payload['taskId']?.toString() ?? '',
+      userId: payload['userId']?.toString() ?? '',
+      deviceId: payload['deviceId']?.toString() ?? '',
+      type: DeviceTaskStatus.queued,
+      status: DeviceTaskStatus.queued,
+      level: 'info',
+      message: 'Command published to message bus',
+      output: '',
+      recoverable: false,
+      payload: {'commandType': payload['type'], 'text': payload['text'] ?? ''},
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+    );
   }
 }
 

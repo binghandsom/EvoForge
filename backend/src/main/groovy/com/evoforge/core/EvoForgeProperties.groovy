@@ -49,7 +49,9 @@ class EvoForgeProperties {
         boolean enabled = true
         int maxSteps = 8
         int maxKnowledgeResults = 8
+        int maxThreadTurns = 20
         String knowledgeStorage = 'data/agent-knowledge.json'
+        String conversationStorage = 'data/agent-conversations.json'
         boolean shellEnabled = true
         int shellTimeoutSeconds = 10
         int fileListLimit = 200
@@ -77,6 +79,8 @@ class EvoForgeProperties {
         String eventExchange = 'evoforge.events'
         String commandQueue = ''
         String commandRoutingKey = ''
+        String requestQueue = ''
+        String requestRoutingKey = ''
         String eventQueue = ''
         String eventRoutingKey = ''
         String commandSigningSecret = ''

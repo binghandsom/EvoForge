@@ -1,14 +1,17 @@
 package com.evoforge.device
 
+import com.evoforge.agent.AgentKnowledgeFact
+import com.evoforge.agent.AgentKnowledgeService
 import com.evoforge.core.EvoForgeProperties
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Duration
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Service
@@ -16,9 +19,16 @@ class CodexTaskExecutor {
     private static final Logger log = LoggerFactory.getLogger(CodexTaskExecutor)
 
     private final EvoForgeProperties properties
+    private final AgentKnowledgeService knowledgeService
 
     CodexTaskExecutor(EvoForgeProperties properties) {
+        this(properties, null)
+    }
+
+    @Autowired
+    CodexTaskExecutor(EvoForgeProperties properties, AgentKnowledgeService knowledgeService) {
         this.properties = properties
+        this.knowledgeService = knowledgeService
     }
 
     CodexTaskResult execute(DeviceCommandMessage command) {
@@ -35,7 +45,7 @@ class CodexTaskExecutor {
             return CodexTaskResult.failed(workspace.message)
         }
 
-        List<String> args = buildCommand(config, command)
+        List<String> args = buildCommand(config, command, workspace)
         ProcessBuilder builder = new ProcessBuilder(args)
         builder.directory(workspace.path.toFile())
         builder.redirectErrorStream(true)
@@ -92,17 +102,67 @@ class CodexTaskExecutor {
         return key
     }
 
-    private static List<String> buildCommand(EvoForgeProperties.CodexTask config, DeviceCommandMessage command) {
+    private List<String> buildCommand(EvoForgeProperties.CodexTask config, DeviceCommandMessage command, CodexWorkspace workspace) {
         List<String> args = [config.command ?: 'codex']
         if (config.extraArgs) {
             args.addAll(config.extraArgs.findAll { it })
         }
-        String prompt = command.text ?: ''
+        String prompt = enrichedPrompt(command, workspace)
         if (config.promptArg) {
             args << config.promptArg
         }
         args << prompt
         return args
+    }
+
+    private String enrichedPrompt(DeviceCommandMessage command, CodexWorkspace workspace) {
+        String prompt = command.text ?: ''
+        Map learning = learningConfig(command)
+        if (learning.enabled != true || !knowledgeService) {
+            return prompt
+        }
+        String sourceProjectKey = text(learning.sourceProjectKey) ?: workspace?.key ?: workspaceKey(command)
+        String query = [
+            sourceProjectKey,
+            command.text,
+            'change-lineage codex-output project-facts skills architecture errors'
+        ].findAll { it }.join(' ')
+        List<AgentKnowledgeFact> facts = knowledgeService.search(query, 6)
+            .findAll { fact -> !sourceProjectKey || fact.scope == "project:${sourceProjectKey}".toString() || (fact.tags ?: []).contains(sourceProjectKey) }
+            .take(6)
+        if (!facts) {
+            return prompt
+        }
+        String context = facts.collect { fact ->
+            "- ${fact.key} (${fact.source}, confidence ${String.format(Locale.ROOT, '%.2f', fact.confidence)}): ${compact(fact.value, 900)}"
+        }.join('\n')
+        return """${prompt}
+
+EvoForge project memory for ${sourceProjectKey ?: 'current project'}:
+${context}
+
+Use this memory as supporting context. If it conflicts with the current task or repository evidence, verify and prefer the current repository.
+""".stripIndent()
+    }
+
+    private static Map learningConfig(DeviceCommandMessage command) {
+        Object raw = command.attributes?.evoforgeLearning
+        if (raw instanceof Map) {
+            Map config = new LinkedHashMap(raw as Map)
+            config.enabled = config.enabled == true
+            return config
+        }
+        return [enabled: raw == true || command.attributes?.learnWithEvoForge == true]
+    }
+
+    private static String text(Object value) {
+        String result = value == null ? '' : value.toString().trim()
+        return result
+    }
+
+    private static String compact(Object value, int limit) {
+        String normalized = (value ?: '').toString().replaceAll('\\s+', ' ').trim()
+        return normalized.length() > limit ? normalized.take(limit) + '...' : normalized
     }
 
     private static String readOutput(Process process) {

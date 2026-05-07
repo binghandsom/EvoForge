@@ -1,6 +1,9 @@
 package com.evoforge.agent
 
 import com.evoforge.core.EvoForgeProperties
+import com.evoforge.device.DeviceEventPublisher
+import com.evoforge.device.DeviceProtocol
+import com.evoforge.device.DeviceTaskEvent
 import com.evoforge.llm.ModelHub
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.stereotype.Service
@@ -10,59 +13,83 @@ class AgentRuntimeService {
     private final ModelHub modelHub
     private final AgentToolRegistry toolRegistry
     private final AgentKnowledgeService knowledgeService
+    private final AgentConversationMemoryService conversationMemoryService
+    private final DeviceEventPublisher eventPublisher
     private final EvoForgeProperties properties
     private final ObjectMapper objectMapper
 
     AgentRuntimeService(ModelHub modelHub,
                         AgentToolRegistry toolRegistry,
                         AgentKnowledgeService knowledgeService,
+                        AgentConversationMemoryService conversationMemoryService,
+                        DeviceEventPublisher eventPublisher,
                         EvoForgeProperties properties,
                         ObjectMapper objectMapper) {
         this.modelHub = modelHub
         this.toolRegistry = toolRegistry
         this.knowledgeService = knowledgeService
+        this.conversationMemoryService = conversationMemoryService
+        this.eventPublisher = eventPublisher
         this.properties = properties
         this.objectMapper = objectMapper
     }
 
     AgentRunResult run(String input, Map<String, Object> attributes = [:]) {
+        Map<String, Object> runAttributes = new LinkedHashMap<>(attributes ?: [:])
+        String threadId = conversationMemoryService.resolveThreadId(runAttributes)
+        runAttributes.threadId = threadId
+        List<AgentConversationTurn> conversationContext = conversationMemoryService.recent(threadId, properties.agent.maxThreadTurns)
+        if ((input ?: '').trim()) {
+            conversationMemoryService.append(threadId, 'user', input ?: '', [
+                taskId: runAttributes.taskId,
+                userId: runAttributes.userId,
+                source: 'agent-runtime'
+            ].findAll { it.value != null } as Map<String, Object>)
+        }
+
         List<Map<String, Object>> observations = []
         List<Map<String, Object>> routes = []
         List<Map<String, Object>> writes = []
         AgentToolContext context = new AgentToolContext(
-            taskId: attributes?.taskId?.toString(),
-            userId: attributes?.userId?.toString(),
-            deviceId: attributes?.deviceId?.toString(),
-            attributes: attributes ?: [:]
+            taskId: runAttributes?.taskId?.toString(),
+            userId: runAttributes?.userId?.toString(),
+            deviceId: runAttributes?.deviceId?.toString(),
+            attributes: runAttributes
         )
 
         int maxSteps = Math.max(1, Math.min(properties.agent.maxSteps, 20))
         for (int step = 1; step <= maxSteps; step++) {
-            AgentPlannerTurn turn = plan(input, observations, routes, attributes ?: [:])
+            AgentPlannerTurn turn = plan(input, observations, routes, conversationContext, runAttributes)
             routes = mergeRoutes(routes, turn.routes)
             persistKnowledge(turn.knowledgeWrites, writes)
+            publishProgress(runAttributes, step, 'plan', turn.thought ?: 'Planner selected next action.', [
+                thought        : turn.thought,
+                selectedRouteId: turn.selectedRouteId,
+                routes         : turn.routes ?: [],
+                action         : turn.action ?: [:]
+            ])
 
             if (turn.finalAnswer) {
-                return new AgentRunResult(
+                return finishRun(threadId, conversationContext, new AgentRunResult(
                     success: true,
                     output: turn.finalAnswer,
                     routes: routes,
                     observations: observations,
                     knowledgeWrites: writes,
                     stopReason: 'final'
-                )
+                ))
             }
 
             Map<String, Object> action = turn.action ?: fallbackAction(step, input)
             if (!action?.tool) {
-                return new AgentRunResult(
+                return finishRun(threadId, conversationContext, new AgentRunResult(
                     success: false,
                     output: '没有可执行的下一步动作。',
                     routes: routes,
                     observations: observations,
                     knowledgeWrites: writes,
                     stopReason: 'no-action'
-                )
+                ))
             }
 
             AgentToolResult result = toolRegistry.execute(action.tool.toString(), (action.args ?: [:]) as Map<String, Object>, context)
@@ -79,25 +106,29 @@ class AgentRuntimeService {
                 availableRoutes: routes
             ]
             observations << observation
+            publishProgress(runAttributes, step, 'observe', result.success ? "Tool completed: ${action.tool}".toString() : "Tool failed: ${action.tool}".toString(), [
+                observation: observation
+            ])
             learnFromObservation(observation, writes)
         }
 
-        String answer = summarize(input, routes, observations, attributes ?: [:])
-        return new AgentRunResult(
+        String answer = summarize(input, routes, observations, conversationContext, runAttributes)
+        return finishRun(threadId, conversationContext, new AgentRunResult(
             success: true,
             output: answer,
             routes: routes,
             observations: observations,
             knowledgeWrites: writes,
             stopReason: 'max-steps'
-        )
+        ))
     }
 
     private AgentPlannerTurn plan(String input,
                                   List<Map<String, Object>> observations,
                                   List<Map<String, Object>> routes,
+                                  List<AgentConversationTurn> conversationContext,
                                   Map<String, Object> attributes) {
-        String prompt = buildPlannerPrompt(input, observations, routes)
+        String prompt = buildPlannerPrompt(input, observations, routes, conversationContext)
         String response = modelHub.getLlm(attributes.llm?.toString()).chat(prompt, [temperature: 0.2d, maxTokens: 2400] as Map<String, Object>)
         Map parsed = tryParseJson(response)
         if (!parsed) {
@@ -119,12 +150,18 @@ class AgentRuntimeService {
 
     private String buildPlannerPrompt(String input,
                                       List<Map<String, Object>> observations,
-                                      List<Map<String, Object>> routes) {
-        def facts = knowledgeService.search(input ?: '', properties.agent.maxKnowledgeResults).collect { KnowledgeSearchTool.toView(it) }
+                                      List<Map<String, Object>> routes,
+                                      List<AgentConversationTurn> conversationContext) {
+        String knowledgeQuery = conversationMemoryService.searchableText(conversationContext, input ?: '')
+        def facts = knowledgeService.search(knowledgeQuery, properties.agent.maxKnowledgeResults).collect { KnowledgeSearchTool.toView(it) }
         return """
 You are EvoForge's task planner. You do not execute operations yourself; you choose tools.
 The system is intentionally dynamic: produce multiple possible routes, execute one low-risk next action, observe the result, then adapt.
 Prefer stable reusable knowledge, but verify cheap facts when they may drift. When a route fails, preserve the failure and try another plausible route.
+You have OpenClaw-style memory layers:
+- Thread memory is the recent conversation in this same thread. Use it to resolve follow-ups, pronouns, corrections, and "continue that" requests.
+- Knowledge facts are durable reusable memories. Only write stable facts there; do not turn every chat message into long-term knowledge.
+Latest user message wins if it corrects older thread context.
 
 Return only JSON:
 {
@@ -150,6 +187,9 @@ Rules:
 User task:
 ${input ?: ''}
 
+Thread memory (same conversation, chronological, before this user message):
+${conversationMemoryService.formatForPrompt(conversationContext)}
+
 Known reusable facts:
 ${objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(facts)}
 
@@ -167,12 +207,16 @@ ${objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(observations)
     private String summarize(String input,
                              List<Map<String, Object>> routes,
                              List<Map<String, Object>> observations,
+                             List<AgentConversationTurn> conversationContext,
                              Map<String, Object> attributes) {
         String prompt = """
 Summarize the current EvoForge agent run for the user.
 Be concrete about what was tried, what worked, what failed, and the next actionable path.
+Respect the same-thread conversation context when explaining follow-up tasks.
 
 Task: ${input ?: ''}
+Thread memory:
+${conversationMemoryService.formatForPrompt(conversationContext)}
 Routes:
 ${objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(routes)}
 Observations:
@@ -185,20 +229,36 @@ ${objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(observations)
         }
     }
 
+    private AgentRunResult finishRun(String threadId,
+                                     List<AgentConversationTurn> conversationContext,
+                                     AgentRunResult result) {
+        result.threadId = threadId
+        result.conversationContext = conversationMemoryService.toView(conversationContext)
+        if ((result.output ?: '').trim()) {
+            conversationMemoryService.append(threadId, 'assistant', result.output ?: '', [
+                source          : 'agent-runtime',
+                stopReason      : result.stopReason,
+                success         : result.success,
+                routeCount      : result.routes?.size() ?: 0,
+                observationCount: result.observations?.size() ?: 0
+            ] as Map<String, Object>)
+        }
+        return result
+    }
+
     private void persistKnowledge(List<Map<String, Object>> items, List<Map<String, Object>> writes) {
         (items ?: []).each { item ->
-            if (!item?.key || !item?.value) {
-                return
+            if (item?.key && item?.value) {
+                AgentKnowledgeFact fact = knowledgeService.upsert(
+                    item.key?.toString(),
+                    item.value?.toString(),
+                    item.scope?.toString() ?: 'global',
+                    item.tags instanceof Collection ? item.tags.collect { it.toString() } : [],
+                    item.source?.toString() ?: 'planner',
+                    item.confidence instanceof Number ? item.confidence.doubleValue() : 0.7d
+                )
+                writes << KnowledgeSearchTool.toView(fact)
             }
-            AgentKnowledgeFact fact = knowledgeService.upsert(
-                item.key?.toString(),
-                item.value?.toString(),
-                item.scope?.toString() ?: 'global',
-                item.tags instanceof Collection ? item.tags.collect { it.toString() } : [],
-                item.source?.toString() ?: 'planner',
-                item.confidence instanceof Number ? item.confidence.doubleValue() : 0.7d
-            )
-            writes << KnowledgeSearchTool.toView(fact)
         }
     }
 
@@ -230,6 +290,33 @@ ${objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(observations)
                 writes << KnowledgeSearchTool.toView(fact)
             }
         }
+    }
+
+    private void publishProgress(Map<String, Object> attributes,
+                                 int step,
+                                 String phase,
+                                 String message,
+                                 Map<String, Object> payload) {
+        if (!attributes?.taskId) {
+            return
+        }
+        Map<String, Object> body = [
+            threadId: attributes.threadId,
+            phase   : phase,
+            step    : step
+        ] as Map<String, Object>
+        body.putAll(payload ?: [:])
+        eventPublisher.publish(new DeviceTaskEvent(
+            taskId: attributes.taskId?.toString(),
+            userId: attributes.userId?.toString(),
+            deviceId: attributes.deviceId?.toString(),
+            type: DeviceProtocol.STATUS_AGENT_PROGRESS,
+            status: DeviceProtocol.STATUS_RUNNING,
+            level: phase == 'observe' && payload?.observation?.success == false ? 'warn' : 'info',
+            message: message ?: phase,
+            recoverable: false,
+            payload: body.findAll { it.value != null } as Map<String, Object>
+        ))
     }
 
     private static List<Map<String, Object>> mergeRoutes(List<Map<String, Object>> existing, List<Map<String, Object>> incoming) {

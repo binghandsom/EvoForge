@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 @ConditionalOnProperty(prefix = 'evoforge.deviceAgent', name = 'enabled', havingValue = 'true')
 class DeviceAgentMessagingConfig {
     static final String COMMAND_QUEUE_BEAN = 'deviceCommandQueue'
+    static final String REQUEST_QUEUE_BEAN = 'deviceRequestQueue'
     static final String EVENT_QUEUE_BEAN = 'deviceEventQueue'
     static final String LISTENER_FACTORY_BEAN = 'deviceAgentListenerContainerFactory'
 
@@ -49,6 +50,11 @@ class DeviceAgentMessagingConfig {
         return new Queue(commandQueueName(), true)
     }
 
+    @Bean(REQUEST_QUEUE_BEAN)
+    Queue deviceRequestQueue() {
+        return new Queue(requestQueueName(), true)
+    }
+
     @Bean(EVENT_QUEUE_BEAN)
     Queue deviceEventQueue() {
         return new Queue(eventQueueName(), true)
@@ -61,6 +67,15 @@ class DeviceAgentMessagingConfig {
             .bind(deviceCommandQueue)
             .to(deviceCommandExchange)
             .with(commandRoutingKey())
+    }
+
+    @Bean
+    Binding deviceRequestBinding(@Qualifier(REQUEST_QUEUE_BEAN) Queue deviceRequestQueue,
+                                 @Qualifier('deviceCommandExchange') DirectExchange deviceCommandExchange) {
+        return BindingBuilder
+            .bind(deviceRequestQueue)
+            .to(deviceCommandExchange)
+            .with(requestRoutingKey())
     }
 
     @Bean
@@ -96,6 +111,14 @@ class DeviceAgentMessagingConfig {
 
     private String commandRoutingKey() {
         return (properties.deviceAgent.commandRoutingKey ?: "user.${properties.deviceAgent.userId}.device.${properties.deviceAgent.deviceId}.command").toString()
+    }
+
+    private String requestQueueName() {
+        return (properties.deviceAgent.requestQueue ?: "evoforge.device.${properties.deviceAgent.deviceId}.requests").toString()
+    }
+
+    private String requestRoutingKey() {
+        return (properties.deviceAgent.requestRoutingKey ?: "user.${properties.deviceAgent.userId}.device.${properties.deviceAgent.deviceId}.request").toString()
     }
 
     private String eventQueueName() {

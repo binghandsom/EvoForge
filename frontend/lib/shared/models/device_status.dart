@@ -7,8 +7,10 @@ class DeviceStatus {
   final String commandExchange;
   final String eventExchange;
   final String commandQueue;
+  final String requestQueue;
   final String eventQueue;
   final String commandRoutingKey;
+  final String requestRoutingKey;
   final String eventRoutingKey;
   final int heartbeatSeconds;
   final List<String> commandTypes;
@@ -27,8 +29,10 @@ class DeviceStatus {
     required this.commandExchange,
     required this.eventExchange,
     required this.commandQueue,
+    required this.requestQueue,
     required this.eventQueue,
     required this.commandRoutingKey,
+    required this.requestRoutingKey,
     required this.eventRoutingKey,
     required this.heartbeatSeconds,
     required this.commandTypes,
@@ -49,8 +53,10 @@ class DeviceStatus {
       commandExchange: json['commandExchange']?.toString() ?? '',
       eventExchange: json['eventExchange']?.toString() ?? '',
       commandQueue: json['commandQueue']?.toString() ?? '',
+      requestQueue: json['requestQueue']?.toString() ?? '',
       eventQueue: json['eventQueue']?.toString() ?? '',
       commandRoutingKey: json['commandRoutingKey']?.toString() ?? '',
+      requestRoutingKey: json['requestRoutingKey']?.toString() ?? '',
       eventRoutingKey: json['eventRoutingKey']?.toString() ?? '',
       heartbeatSeconds:
           int.tryParse(json['heartbeatSeconds']?.toString() ?? '') ?? 0,

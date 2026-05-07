@@ -21,9 +21,22 @@ class DeviceCommandListener {
 
     @RabbitListener(queues = '#{@deviceCommandQueue.name}', containerFactory = 'deviceAgentListenerContainerFactory')
     void onCommand(DeviceCommandMessage command) {
+        handle(command, false)
+    }
+
+    @RabbitListener(queues = '#{@deviceRequestQueue.name}', containerFactory = 'deviceAgentListenerContainerFactory')
+    void onClientRequest(DeviceCommandMessage command) {
+        handle(command, true)
+    }
+
+    private void handle(DeviceCommandMessage command, boolean requestOnly) {
         DeviceCommandSignatureVerification verification = signatureService.verifyDetailed(command)
         if (!verification.valid) {
             publishRejectedSignature(command, verification.reason)
+            return
+        }
+        if (requestOnly && command?.type != DeviceProtocol.TYPE_CLIENT_REQUEST) {
+            publishRejectedSignature(command, 'Request queue only accepts client_request commands')
             return
         }
         executor.handle(command)

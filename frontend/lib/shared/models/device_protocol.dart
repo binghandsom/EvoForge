@@ -2,6 +2,7 @@ class DeviceCommandType {
   static const naturalLanguageTask = 'natural_language_task';
   static const codexTask = 'codex_task';
   static const approvalDecision = 'approval_decision';
+  static const clientRequest = 'client_request';
 }
 
 class DeviceApprovalDecision {
@@ -18,6 +19,8 @@ class DeviceTaskStatus {
   static const running = 'running';
   static const completed = 'completed';
   static const failed = 'failed';
+  static const clientResponse = 'client_response';
+  static const agentProgress = 'agent_progress';
 
   static bool isTerminal(String status) {
     return switch (status) {

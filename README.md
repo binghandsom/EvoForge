@@ -57,6 +57,11 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:18080
 - `GET /api/audit/{skillId}` list audit events for a skill
 - `POST /api/agent/respond` chat or call skill by id
 - `POST /api/agent/route` route input through skill candidate retrieval (optionally execute)
+- `GET /api/agent/conversations` list persisted agent conversation threads
+- `POST /api/agent/conversations` create a conversation thread
+- `GET /api/agent/conversations/{threadId}/turns` load same-thread user/assistant turns
+
+The web console can also run without a direct HTTP path to the backend. Configure `frontend/config/evoforge.local.json` with RabbitMQ Web STOMP or a JSON relay route; when that connection is ready, console data fetches use `client_request` messages on the `.request` routing key and receive `client_response` events from `evoforge.events`. Long-running tasks stay on the `.command` routing key, so quick UI queries are not blocked behind agent execution. The REST endpoints remain useful for local development and diagnostics.
 
 ## Remote device agent
 When enabled, EvoForge acts as a PC-side agent node:
@@ -75,7 +80,9 @@ Example command:
   "type": "natural_language_task",
   "text": "Summarize the active EvoForge backend design",
   "requiresApproval": false,
-  "attributes": {}
+  "attributes": {
+    "threadId": "thread-uuid"
+  }
 }
 ```
 
@@ -158,6 +165,9 @@ Example RabbitMQ approval decision:
 - Skills are stored in PostgreSQL by default and mirrored to `skills/<skill-id>/` as `manifest.json`, `skill.groovy`, and `SKILL.md`.
 - Hot-reload runs every 5 seconds by default (configurable in `application.yml`).
 - Model providers are pluggable via `LlmProvider` and `CodeModelProvider` beans, and GPT/Claude/OpenAI-compatible configs can be managed from the Settings page.
+- Open-ended ordinary tasks run through a dynamic agent runtime: the LLM proposes multiple routes, executes one registered tool at a time, observes failures, replans, and persists reusable facts in the agent knowledge base.
+- Frontend conversations carry a stable `threadId`; the backend stores same-thread turns as active memory and injects them into later planner/direct-chat prompts, while durable facts stay in the agent knowledge base.
+- Cross-network frontend/backend interaction is message-bus-first: clients publish `client_request`, `natural_language_task`, `codex_task`, and approval commands to the command exchange, while backend progress, observations, and final responses are published as events.
 - Audit and history logs are stored in PostgreSQL.
 - File-backed JSON storage remains available with `EVOFORGE_SKILL_STORAGE_BACKEND=file` or `evoforge.skills.storageBackend=file`.
 - RabbitMQ remote control is disabled by default; enable it with `EVOFORGE_DEVICE_AGENT_ENABLED=true`.
@@ -167,6 +177,7 @@ Example RabbitMQ approval decision:
 - Tune routing breadth with `evoforge.skills.routerCandidateLimit` and `evoforge.skills.routerMinCandidateScore`.
 - Local secrets are loaded from `~/.evoforge/application-secrets.yml`; see `docs/application-secrets.example.yml` for a copyable template.
 - For multiple Codex-maintained projects, configure `evoforge.codexTask.defaultWorkspace` and `evoforge.codexTask.workspaces` as a project-key whitelist, then send `attributes.projectKey` with `codex_task`.
+- When a `codex_task` opts into `attributes.evoforgeLearning`, EvoForge records the submitted task, selected project, Codex output/error, same-thread id, and previous latest change into project-scoped knowledge so later tasks can use the project change lineage.
 
 ## Example skill
 ```groovy

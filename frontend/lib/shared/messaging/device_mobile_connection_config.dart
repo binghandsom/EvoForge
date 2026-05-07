@@ -12,6 +12,7 @@ class DeviceMobileConnectionConfig {
   final String deviceId;
   final String commandExchange;
   final String commandRoutingKey;
+  final String requestRoutingKey;
   final String eventExchange;
   final String eventRoutingKey;
   final String eventQueue;
@@ -29,6 +30,7 @@ class DeviceMobileConnectionConfig {
     required this.deviceId,
     required this.commandExchange,
     required this.commandRoutingKey,
+    required this.requestRoutingKey,
     required this.eventExchange,
     required this.eventRoutingKey,
     required this.eventQueue,
@@ -46,6 +48,7 @@ class DeviceMobileConnectionConfig {
     required String deviceId,
     required String commandExchange,
     required String commandRoutingKey,
+    required String requestRoutingKey,
     required String eventExchange,
     required String eventRoutingKey,
     required String eventQueue,
@@ -63,6 +66,7 @@ class DeviceMobileConnectionConfig {
       deviceId: deviceId,
       commandExchange: commandExchange,
       commandRoutingKey: commandRoutingKey,
+      requestRoutingKey: requestRoutingKey,
       eventExchange: eventExchange,
       eventRoutingKey: eventRoutingKey,
       eventQueue: eventQueue,
@@ -81,6 +85,7 @@ class DeviceMobileConnectionConfig {
     required String deviceId,
     required String commandExchange,
     required String commandRoutingKey,
+    required String requestRoutingKey,
     required String eventExchange,
     required String eventRoutingKey,
     required String eventQueue,
@@ -94,6 +99,7 @@ class DeviceMobileConnectionConfig {
       deviceId: deviceId,
       commandExchange: commandExchange,
       commandRoutingKey: commandRoutingKey,
+      requestRoutingKey: requestRoutingKey,
       eventExchange: eventExchange,
       eventRoutingKey: eventRoutingKey,
       eventQueue: eventQueue,
@@ -121,6 +127,9 @@ class DeviceMobileConnectionConfig {
       deviceId: status.deviceId,
       commandExchange: status.commandExchange,
       commandRoutingKey: status.commandRoutingKey,
+      requestRoutingKey: status.requestRoutingKey.isNotEmpty
+          ? status.requestRoutingKey
+          : _defaultRequestRoutingKey(status.userId, status.deviceId),
       eventExchange: status.eventExchange,
       eventRoutingKey: status.eventRoutingKey,
       eventQueue: status.eventQueue,
@@ -154,7 +163,8 @@ class DeviceMobileConnectionConfig {
         userId.isNotEmpty &&
         deviceId.isNotEmpty &&
         commandExchange.isNotEmpty &&
-        commandRoutingKey.isNotEmpty;
+        commandRoutingKey.isNotEmpty &&
+        requestRoutingKey.isNotEmpty;
     if (!commonReady) return false;
     return switch (transportKind) {
       DeviceMobileTransportKind.rabbitMqWebStomp =>
@@ -174,6 +184,7 @@ class DeviceMobileConnectionConfig {
       'Device': deviceId,
       'Command Exchange': commandExchange,
       'Command Routing Key': commandRoutingKey,
+      'Request Routing Key': requestRoutingKey,
       'Event Exchange': eventExchange,
       'Event Routing Key': eventRoutingKey,
       'Event Queue': eventQueue,
@@ -197,5 +208,9 @@ class DeviceMobileConnectionConfig {
     if (secret.isEmpty) return 'not configured';
     if (!redact) return secret;
     return 'configured';
+  }
+
+  static String _defaultRequestRoutingKey(String userId, String deviceId) {
+    return 'user.$userId.device.$deviceId.request';
   }
 }

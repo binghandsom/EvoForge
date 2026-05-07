@@ -19,8 +19,10 @@ class DeviceStatusService {
             commandExchange : properties.deviceAgent.commandExchange,
             eventExchange   : properties.deviceAgent.eventExchange,
             commandQueue    : commandQueue(),
+            requestQueue    : requestQueue(),
             eventQueue      : eventQueue(),
             commandRoutingKey: commandRoutingKey(),
+            requestRoutingKey: requestRoutingKey(),
             eventRoutingKey : eventRoutingKey(),
             heartbeatSeconds: properties.deviceAgent.heartbeatSeconds,
             commandTypes    : DeviceProtocol.commandTypes(),
@@ -53,12 +55,20 @@ class DeviceStatusService {
         return (properties.deviceAgent.eventQueue ?: "evoforge.device.${properties.deviceAgent.deviceId}.events").toString()
     }
 
+    String requestQueue() {
+        return (properties.deviceAgent.requestQueue ?: "evoforge.device.${properties.deviceAgent.deviceId}.requests").toString()
+    }
+
     String commandRoutingKey() {
         return (properties.deviceAgent.commandRoutingKey ?: "user.${properties.deviceAgent.userId}.device.${properties.deviceAgent.deviceId}.command").toString()
     }
 
     String eventRoutingKey() {
         return (properties.deviceAgent.eventRoutingKey ?: "user.${properties.deviceAgent.userId}.device.${properties.deviceAgent.deviceId}.event").toString()
+    }
+
+    String requestRoutingKey() {
+        return (properties.deviceAgent.requestRoutingKey ?: "user.${properties.deviceAgent.userId}.device.${properties.deviceAgent.deviceId}.request").toString()
     }
 
     private String replayStoreName() {

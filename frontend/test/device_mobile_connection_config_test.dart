@@ -17,6 +17,7 @@ void main() {
     expect(config.transportLabel, 'RabbitMQ Web STOMP');
     expect(config.readyForConnection, isTrue);
     expect(config.commandRoutingKey, 'user.user-1.device.pc-1.command');
+    expect(config.requestRoutingKey, 'user.user-1.device.pc-1.request');
     expect(config.eventRoutingKey, 'user.user-1.device.pc-1.event');
 
     final description = config.describe();
@@ -37,6 +38,7 @@ void main() {
       deviceId: 'pc-1',
       commandExchange: 'evoforge.commands',
       commandRoutingKey: 'user.user-1.device.pc-1.command',
+      requestRoutingKey: 'user.user-1.device.pc-1.request',
       eventExchange: '',
       eventRoutingKey: '',
       eventQueue: '',
@@ -82,8 +84,10 @@ DeviceStatus _status() {
     commandExchange: 'evoforge.commands',
     eventExchange: 'evoforge.events',
     commandQueue: 'evoforge.device.pc-1.commands',
+    requestQueue: 'evoforge.device.pc-1.requests',
     eventQueue: 'evoforge.device.pc-1.events',
     commandRoutingKey: 'user.user-1.device.pc-1.command',
+    requestRoutingKey: 'user.user-1.device.pc-1.request',
     eventRoutingKey: 'user.user-1.device.pc-1.event',
     heartbeatSeconds: 30,
     commandTypes: const ['natural_language_task', 'codex_task'],

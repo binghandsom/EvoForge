@@ -23,6 +23,7 @@ class DeviceMobileControllerFactory {
         deviceId: config.deviceId,
         commandExchange: config.commandExchange,
         commandRoutingKey: config.commandRoutingKey,
+        clientRequestRoutingKey: config.requestRoutingKey,
         signer: DeviceCommandSigner(secret: config.commandSigningSecret),
       ),
       eventSigningSecret: config.eventSigningSecret,

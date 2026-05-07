@@ -76,7 +76,9 @@ evoforge:
     enabled: ${EVOFORGE_AGENT_ENABLED:true}
     maxSteps: ${EVOFORGE_AGENT_MAX_STEPS:8}
     maxKnowledgeResults: ${EVOFORGE_AGENT_MAX_KNOWLEDGE_RESULTS:8}
+    maxThreadTurns: ${EVOFORGE_AGENT_MAX_THREAD_TURNS:20}
     knowledgeStorage: data/agent-knowledge.json
+    conversationStorage: data/agent-conversations.json
     shellEnabled: ${EVOFORGE_AGENT_SHELL_ENABLED:true}
     shellTimeoutSeconds: ${EVOFORGE_AGENT_SHELL_TIMEOUT_SECONDS:10}
     fileListLimit: ${EVOFORGE_AGENT_FILE_LIST_LIMIT:200}
