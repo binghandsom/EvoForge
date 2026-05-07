@@ -1,11 +1,32 @@
 server:
-  port: 8080
+  port: ${EVOFORGE_SERVER_PORT:18080}
+
+spring:
+  config:
+    import: optional:file:${user.home}/.evoforge/application-secrets.yml
+  rabbitmq:
+    host: ${EVOFORGE_RABBITMQ_HOST:localhost}
+    port: ${EVOFORGE_RABBITMQ_PORT:5672}
+    username: ${EVOFORGE_RABBITMQ_USERNAME:guest}
+    password: ${EVOFORGE_RABBITMQ_PASSWORD:guest}
+    virtual-host: ${EVOFORGE_RABBITMQ_VHOST:/}
+    ssl:
+      enabled: ${EVOFORGE_RABBITMQ_SSL_ENABLED:false}
 
 evoforge:
+  database:
+    url: ${EVOFORGE_DB_URL:jdbc:postgresql://localhost:5432/evoforge}
+    username: ${EVOFORGE_DB_USER:postgres}
+    password: ${EVOFORGE_DB_PASSWORD:}
+    maximumPoolSize: ${EVOFORGE_DB_POOL_SIZE:5}
   skills:
+    storageBackend: ${EVOFORGE_SKILL_STORAGE_BACKEND:postgres}
     storage: data/skills.json
     auditStorage: data/skill-audit.json
     historyStorage: data/skill-history.json
+    gitLibraryEnabled: true
+    gitLibraryBootstrapOnEmpty: true
+    gitLibraryPath: ../skills
     autoReloadSeconds: 5
     maxCodeSize: 0
     bannedPatterns: []
@@ -20,9 +41,58 @@ evoforge:
     disallowedImports: []
     routerUseLlm: false
     routerMinConfidence: 0.4
+    routerCandidateLimit: ${EVOFORGE_SKILL_ROUTER_CANDIDATE_LIMIT:6}
+    routerMinCandidateScore: ${EVOFORGE_SKILL_ROUTER_MIN_CANDIDATE_SCORE:1.0}
+  deviceAgent:
+    enabled: ${EVOFORGE_DEVICE_AGENT_ENABLED:false}
+    userId: ${EVOFORGE_USER_ID:local-user}
+    deviceId: ${EVOFORGE_DEVICE_ID:local-pc}
+    commandExchange: ${EVOFORGE_COMMAND_EXCHANGE:evoforge.commands}
+    eventExchange: ${EVOFORGE_EVENT_EXCHANGE:evoforge.events}
+    commandQueue: ${EVOFORGE_COMMAND_QUEUE:}
+    commandRoutingKey: ${EVOFORGE_COMMAND_ROUTING_KEY:}
+    eventQueue: ${EVOFORGE_EVENT_QUEUE:}
+    eventRoutingKey: ${EVOFORGE_EVENT_ROUTING_KEY:}
+    commandSigningSecret: ${EVOFORGE_COMMAND_SIGNING_SECRET:}
+    eventSigningSecret: ${EVOFORGE_EVENT_SIGNING_SECRET:${EVOFORGE_COMMAND_SIGNING_SECRET:}}
+    commandSignatureTtlSeconds: ${EVOFORGE_COMMAND_SIGNATURE_TTL_SECONDS:300}
+    prefetch: ${EVOFORGE_DEVICE_AGENT_PREFETCH:1}
+    heartbeatSeconds: ${EVOFORGE_DEVICE_AGENT_HEARTBEAT_SECONDS:30}
+  codexTask:
+    enabled: ${EVOFORGE_CODEX_TASK_ENABLED:false}
+    requiresApproval: ${EVOFORGE_CODEX_TASK_REQUIRES_APPROVAL:true}
+    command: ${EVOFORGE_CODEX_COMMAND:codex}
+    defaultWorkspace: ${EVOFORGE_CODEX_DEFAULT_WORKSPACE:}
+    workingDirectory: ${EVOFORGE_CODEX_WORKDIR:.}
+    workspaces: {}
+    promptArg: ${EVOFORGE_CODEX_PROMPT_ARG:}
+    extraArgs: []
+    timeoutSeconds: ${EVOFORGE_CODEX_TIMEOUT_SECONDS:600}
   models:
     defaultLlm: mock-llm
     defaultCodeModel: mock-code
+    configStorage: data/model-providers.json
+  agent:
+    enabled: ${EVOFORGE_AGENT_ENABLED:true}
+    maxSteps: ${EVOFORGE_AGENT_MAX_STEPS:8}
+    maxKnowledgeResults: ${EVOFORGE_AGENT_MAX_KNOWLEDGE_RESULTS:8}
+    knowledgeStorage: data/agent-knowledge.json
+    shellEnabled: ${EVOFORGE_AGENT_SHELL_ENABLED:true}
+    shellTimeoutSeconds: ${EVOFORGE_AGENT_SHELL_TIMEOUT_SECONDS:10}
+    fileListLimit: ${EVOFORGE_AGENT_FILE_LIST_LIMIT:200}
+    shellAllowedCommands:
+      - pwd
+      - whoami
+      - id
+      - uname
+      - sw_vers
+      - ls
+      - find
+      - stat
+      - mdls
+      - xdg-user-dir
+      - cmd
+      - powershell
 
 management:
   endpoints:

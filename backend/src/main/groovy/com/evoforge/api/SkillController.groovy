@@ -34,7 +34,7 @@ class SkillController {
     }
 
     @GetMapping('{id}')
-    SkillDetailView get(@PathVariable String id) {
+    SkillDetailView get(@PathVariable('id') String id) {
         return toDetail(skillService.get(id))
     }
 
@@ -44,32 +44,32 @@ class SkillController {
     }
 
     @PutMapping('{id}')
-    SkillDetailView update(@PathVariable String id, @RequestBody SkillUpdateRequest request) {
+    SkillDetailView update(@PathVariable('id') String id, @RequestBody SkillUpdateRequest request) {
         return toDetail(skillService.update(id, request))
     }
 
     @PostMapping('{id}/activate')
-    SkillDetailView activate(@PathVariable String id) {
+    SkillDetailView activate(@PathVariable('id') String id) {
         return toDetail(skillService.activate(id))
     }
 
     @PostMapping('{id}/deactivate')
-    SkillDetailView deactivate(@PathVariable String id) {
+    SkillDetailView deactivate(@PathVariable('id') String id) {
         return toDetail(skillService.deactivate(id))
     }
 
     @PostMapping('{id}/execute')
-    SkillResult execute(@PathVariable String id, @RequestBody SkillExecuteRequest request) {
+    SkillResult execute(@PathVariable('id') String id, @RequestBody SkillExecuteRequest request) {
         return skillService.execute(id, request.input, request.attributes ?: [:], request.llm, request.codeModel, request.evaluate)
     }
 
     @GetMapping('{id}/history')
-    List<SkillHistoryEntry> history(@PathVariable String id) {
+    List<SkillHistoryEntry> history(@PathVariable('id') String id) {
         return historyService.listForSkill(id)
     }
 
     @PostMapping('{id}/rollback')
-    SkillDetailView rollback(@PathVariable String id, @RequestBody SkillRollbackRequest request) {
+    SkillDetailView rollback(@PathVariable('id') String id, @RequestBody SkillRollbackRequest request) {
         return toDetail(skillService.rollback(id, request.historyId))
     }
 

@@ -3,6 +3,7 @@ package com.evoforge.history
 import com.evoforge.core.EvoForgeProperties
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
 import java.nio.file.Files
@@ -10,6 +11,7 @@ import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
 @Component
+@ConditionalOnProperty(prefix = 'evoforge.skills', name = 'storageBackend', havingValue = 'file')
 class FileSkillHistoryStore implements SkillHistoryStore {
     private final ObjectMapper objectMapper
     private final Path storagePath

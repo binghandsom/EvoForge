@@ -1,5 +1,7 @@
 package com.evoforge.api
 
+import com.evoforge.agent.AgentKnowledgeService
+import com.evoforge.agent.KnowledgeSearchTool
 import com.evoforge.core.AgentService
 import com.evoforge.router.SkillRouterService
 import org.springframework.web.bind.annotation.*
@@ -9,10 +11,12 @@ import org.springframework.web.bind.annotation.*
 class AgentController {
     private final AgentService agentService
     private final SkillRouterService routerService
+    private final AgentKnowledgeService knowledgeService
 
-    AgentController(AgentService agentService, SkillRouterService routerService) {
+    AgentController(AgentService agentService, SkillRouterService routerService, AgentKnowledgeService knowledgeService) {
         this.agentService = agentService
         this.routerService = routerService
+        this.knowledgeService = knowledgeService
     }
 
     @PostMapping('respond')
@@ -34,7 +38,34 @@ class AgentController {
             ))
             response.skillResult = result.skillResult
             response.output = result.output
+        } else if (request.execute && decision?.action == 'NO_SKILL') {
+            def result = agentService.respond(new AgentRequest(
+                input: request.input,
+                llm: request.llm,
+                codeModel: request.codeModel,
+                attributes: request.attributes ?: [:]
+            ))
+            response.output = result.output
         }
         return response
+    }
+
+    @GetMapping('knowledge')
+    List<Map<String, Object>> searchKnowledge(@RequestParam(value = 'query', required = false) String query,
+                                              @RequestParam(value = 'limit', required = false, defaultValue = '20') int limit) {
+        return knowledgeService.search(query ?: '', limit).collect { KnowledgeSearchTool.toView(it) }
+    }
+
+    @PostMapping('knowledge')
+    Map<String, Object> upsertKnowledge(@RequestBody Map<String, Object> request) {
+        def fact = knowledgeService.upsert(
+            request.key?.toString(),
+            request.value?.toString(),
+            request.scope?.toString() ?: 'global',
+            request.tags instanceof Collection ? request.tags.collect { it.toString() } : [],
+            request.source?.toString() ?: 'api',
+            request.confidence instanceof Number ? request.confidence.doubleValue() : 0.7d
+        )
+        return KnowledgeSearchTool.toView(fact)
     }
 }

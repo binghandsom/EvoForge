@@ -1,0 +1,12 @@
+{
+  "mobileConnection": {
+    "transport": "rabbitmq_web_stomp",
+    "url": "wss://rabbitmq.example.com/ws",
+    "login": "mobile-user",
+    "passcode": "",
+    "virtualHost": "evoforge",
+    "subscribeToDedicatedQueue": false,
+    "commandSigningSecret": "",
+    "eventSigningSecret": ""
+  }
+}

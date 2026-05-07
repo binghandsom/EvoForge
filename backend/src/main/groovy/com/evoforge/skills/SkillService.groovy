@@ -30,6 +30,7 @@ class SkillService {
     private final SkillAuditService auditService
     private final SkillEvaluationService evaluationService
     private final SkillMetricsService metricsService
+    private final SkillLibraryService libraryService
 
     SkillService(SkillStore store,
                  SkillCompiler compiler,
@@ -39,7 +40,8 @@ class SkillService {
                  SkillHistoryService historyService,
                  SkillAuditService auditService,
                  SkillEvaluationService evaluationService,
-                 SkillMetricsService metricsService) {
+                 SkillMetricsService metricsService,
+                 SkillLibraryService libraryService) {
         this.store = store
         this.compiler = compiler
         this.registry = registry
@@ -49,6 +51,7 @@ class SkillService {
         this.auditService = auditService
         this.evaluationService = evaluationService
         this.metricsService = metricsService
+        this.libraryService = libraryService
     }
 
     List<SkillDefinition> list() {
@@ -76,6 +79,7 @@ class SkillService {
         )
         validateAndCompile(skill, false)
         store.save(skill)
+        libraryService.exportSkill(skill)
         historyService.snapshot(skill)
         auditService.record(SkillEventType.CREATED, skill, [version: skill.version])
         return skill
@@ -111,6 +115,7 @@ class SkillService {
 
         validateAndCompile(existing, existing.enabled)
         store.save(existing)
+        libraryService.exportSkill(existing)
         auditService.record(SkillEventType.UPDATED, existing, [version: existing.version])
         if (existing.enabled) {
             registry.refreshFromStore(true)
@@ -125,6 +130,7 @@ class SkillService {
         existing.updatedAt = Instant.now()
         validateAndCompile(existing, true)
         store.save(existing)
+        libraryService.exportSkill(existing)
         auditService.record(SkillEventType.ACTIVATED, existing, [:])
         return existing
     }
@@ -137,6 +143,7 @@ class SkillService {
         }
         existing.updatedAt = Instant.now()
         store.save(existing)
+        libraryService.exportSkill(existing)
         registry.remove(existing.id)
         auditService.record(SkillEventType.DEACTIVATED, existing, [:])
         return existing
@@ -161,6 +168,7 @@ class SkillService {
         existing.updatedAt = Instant.now()
         validateAndCompile(existing, existing.enabled)
         store.save(existing)
+        libraryService.exportSkill(existing)
         auditService.record(SkillEventType.ROLLED_BACK, existing, [historyId: historyId])
         if (existing.enabled) {
             registry.refreshFromStore(true)

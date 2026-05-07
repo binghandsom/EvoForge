@@ -1,0 +1,16 @@
+.DS_Store
+backend/.gradle/
+backend/bin/
+backend/build/
+backend/target/
+frontend/build/
+backend/data/
+data/
+frontend/.dart_tool/
+.evoforge/
+application-secrets.yml
+application-secrets*.yml
+!docs/application-secrets.example.yml
+*.local.yml
+frontend/config/evoforge.local.json
+frontend/config/*.local.json

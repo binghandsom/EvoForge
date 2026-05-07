@@ -13,7 +13,12 @@ class MockCodeModelProvider implements CodeModelProvider {
     CodeModelClient client() {
         return new CodeModelClient() {
             @Override
-            String generateSkill(String prompt, Map<String, Object> options = [:]) {
+            String generateSkill(String prompt) {
+                return generateSkill(prompt, [:])
+            }
+
+            @Override
+            String generateSkill(String prompt, Map<String, Object> options) {
                 return """
 package com.evoforge.dynamic
 

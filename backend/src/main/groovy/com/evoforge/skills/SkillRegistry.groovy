@@ -4,6 +4,7 @@ import com.evoforge.core.EvoForgeProperties
 import com.evoforge.core.SkillChecksum
 import com.evoforge.model.SkillDefinition
 import com.evoforge.store.SkillStore
+import org.springframework.context.annotation.DependsOn
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
@@ -14,6 +15,7 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 @Component
+@DependsOn('skillLibraryBootstrap')
 class SkillRegistry {
     private static final Logger log = LoggerFactory.getLogger(SkillRegistry)
 

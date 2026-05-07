@@ -19,7 +19,7 @@ class AuditController {
     }
 
     @GetMapping('{skillId}')
-    List<SkillEvent> listForSkill(@PathVariable String skillId) {
+    List<SkillEvent> listForSkill(@PathVariable('skillId') String skillId) {
         return auditService.listForSkill(skillId)
     }
 }

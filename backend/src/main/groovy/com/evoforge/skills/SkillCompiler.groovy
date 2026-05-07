@@ -3,8 +3,8 @@ package com.evoforge.skills
 import com.evoforge.core.EvoForgeProperties
 import com.evoforge.model.SkillDefinition
 import groovy.lang.GroovyClassLoader
-import groovy.control.CompilerConfiguration
-import groovy.control.customizers.SecureASTCustomizer
+import org.codehaus.groovy.control.CompilerConfiguration
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer
 import org.springframework.stereotype.Component
 
 @Component
