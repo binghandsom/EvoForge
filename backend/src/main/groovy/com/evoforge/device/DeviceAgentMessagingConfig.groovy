@@ -102,6 +102,7 @@ class DeviceAgentMessagingConfig {
         factory.connectionFactory = connectionFactory
         factory.messageConverter = deviceAgentMessageConverter
         factory.prefetchCount = Math.max(1, properties.deviceAgent.prefetch)
+        factory.concurrentConsumers = Math.max(1, properties.deviceAgent.concurrentConsumers)
         return factory
     }
 

@@ -41,7 +41,7 @@ class SkillRegistry {
     }
 
     void refreshFromStore(boolean force) {
-        List<SkillDefinition> all = store.loadAll()
+        List<SkillDefinition> all = store.loadAllSummaries()
         Set<String> activeIds = [] as Set
 
         all.each { skill ->
@@ -51,18 +51,20 @@ class SkillRegistry {
                 return
             }
 
-            String checksum = skill.checksum ?: SkillChecksum.sha256(skill.code)
+            String checksum = skill.checksum
             def existing = registry.get(skill.id)
-            if (!force && existing && existing.definition?.checksum == checksum) {
+            if (checksum && !force && existing && existing.definition?.checksum == checksum) {
                 return
             }
 
             try {
-                Class<? extends Skill> clazz = compiler.compile(skill)
-                skill.checksum = checksum
-                skill.updatedAt = Instant.now()
-                registry.put(skill.id, new SkillRuntimeEntry(definition: skill, skillClass: clazz, compiledAt: Instant.now()))
-                log.info('Loaded skill {} ({})', skill.name, skill.id)
+                SkillDefinition fullSkill = skill.code ? skill : store.findById(skill.id).orElse(skill)
+                checksum = fullSkill.checksum ?: SkillChecksum.sha256(fullSkill.code)
+                Class<? extends Skill> clazz = compiler.compile(fullSkill)
+                fullSkill.checksum = checksum
+                fullSkill.updatedAt = Instant.now()
+                registry.put(fullSkill.id, new SkillRuntimeEntry(definition: fullSkill, skillClass: clazz, compiledAt: Instant.now()))
+                log.info('Loaded skill {} ({})', fullSkill.name, fullSkill.id)
             } catch (Exception ex) {
                 log.warn('Failed to load skill {}: {}', skill.id, ex.message)
             }

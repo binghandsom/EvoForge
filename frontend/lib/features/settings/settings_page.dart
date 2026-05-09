@@ -20,10 +20,13 @@ class _SettingsPageState extends State<SettingsPage> {
   DeviceStatus? status;
   FrontendRuntimeConfig runtimeConfig = FrontendRuntimeConfig.empty();
   List<ModelProviderConfigView> modelConfigs = const [];
+  List<TesterCommandStatus> testerCapabilities = const [];
+  String selectedTesterProjectKey = '';
   String runtimeConfigError = '';
   bool loading = false;
   bool configLoading = false;
   bool modelConfigLoading = false;
+  bool testerLoading = false;
 
   @override
   void initState() {
@@ -33,13 +36,22 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> loadAll() async {
     await Future.wait([loadStatus(), loadRuntimeConfig(), loadModelConfigs()]);
+    await loadTesterCapabilities();
   }
 
   Future<void> loadStatus() async {
     setState(() => loading = true);
     try {
       final data = await widget.api.loadDeviceStatus();
-      if (mounted) setState(() => status = data);
+      if (mounted) {
+        setState(() {
+          status = data;
+          selectedTesterProjectKey = _resolveTesterProjectKey(
+            data,
+            selectedTesterProjectKey,
+          );
+        });
+      }
     } catch (e) {
       showMessage('加载设备配置失败: $e');
     } finally {
@@ -72,6 +84,97 @@ class _SettingsPageState extends State<SettingsPage> {
     } finally {
       if (mounted) setState(() => modelConfigLoading = false);
     }
+  }
+
+  Future<void> loadTesterCapabilities([String? projectKey]) async {
+    final key = projectKey ?? selectedTesterProjectKey;
+    if (key.isEmpty || testerLoading) return;
+    setState(() => testerLoading = true);
+    try {
+      final capabilities = await widget.api.loadTesterCapabilities(key);
+      if (mounted) setState(() => testerCapabilities = capabilities);
+    } catch (e) {
+      showMessage('加载测试员能力失败: $e');
+    } finally {
+      if (mounted) setState(() => testerLoading = false);
+    }
+  }
+
+  Future<void> discoverTesterCapabilities({required bool useModel}) async {
+    final key = selectedTesterProjectKey;
+    if (key.isEmpty || testerLoading) return;
+    setState(() => testerLoading = true);
+    try {
+      final capabilities = await widget.api.discoverTesterCapabilities(
+        projectKey: key,
+        useModel: useModel,
+      );
+      if (mounted) setState(() => testerCapabilities = capabilities);
+      showMessage(useModel ? '模型已更新测试员能力' : '已根据项目模板发现测试员能力');
+    } catch (e) {
+      showMessage('发现测试员能力失败: $e');
+    } finally {
+      if (mounted) setState(() => testerLoading = false);
+    }
+  }
+
+  Future<void> openTesterCapabilityDialog([
+    TesterCommandStatus? capability,
+  ]) async {
+    final payload = await showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (context) => _TesterCapabilityDialog(
+        projectKey: selectedTesterProjectKey,
+        capability: capability,
+      ),
+    );
+    if (payload == null) return;
+    try {
+      await widget.api.saveTesterCapability(payload);
+      showMessage(capability == null ? '测试员能力已创建' : '测试员能力已更新');
+      await loadTesterCapabilities();
+    } catch (e) {
+      showMessage('保存测试员能力失败: $e');
+    }
+  }
+
+  Future<void> deleteTesterCapability(TesterCommandStatus capability) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除测试员能力'),
+        content: Text('确定删除 ${capability.name}？之后测试计划不会再选择它。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.api.deleteTesterCapability(
+        projectKey: selectedTesterProjectKey,
+        id: capability.id,
+      );
+      showMessage('测试员能力已删除');
+      await loadTesterCapabilities();
+    } catch (e) {
+      showMessage('删除测试员能力失败: $e');
+    }
+  }
+
+  void changeTesterProject(String projectKey) {
+    setState(() {
+      selectedTesterProjectKey = projectKey;
+      testerCapabilities = const [];
+    });
+    loadTesterCapabilities(projectKey);
   }
 
   Future<void> openModelConfigDialog([ModelProviderConfigView? config]) async {
@@ -146,7 +249,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
         ),
-        if (loading || configLoading || modelConfigLoading)
+        if (loading || configLoading || modelConfigLoading || testerLoading)
           const LinearProgressIndicator(),
         Expanded(
           child: ListView(
@@ -154,6 +257,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
                 child: _SettingsBody(
+                  usesMessageBus: widget.api.usesMessageBus,
                   runtimeConfig: runtimeConfig,
                   runtimeConfigError: runtimeConfigError,
                 ),
@@ -167,6 +271,26 @@ class _SettingsPageState extends State<SettingsPage> {
                   onEdit: openModelConfigDialog,
                   onDelete: deleteModelConfig,
                 ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: current == null
+                    ? const _TesterCapabilityPlaceholder()
+                    : _TesterCapabilitySection(
+                        status: current,
+                        projectKey: selectedTesterProjectKey,
+                        capabilities: testerCapabilities,
+                        loading: testerLoading,
+                        onProjectChanged: changeTesterProject,
+                        onRefresh: loadTesterCapabilities,
+                        onDiscover: () =>
+                            discoverTesterCapabilities(useModel: false),
+                        onModelDiscover: () =>
+                            discoverTesterCapabilities(useModel: true),
+                        onAdd: () => openTesterCapabilityDialog(),
+                        onEdit: openTesterCapabilityDialog,
+                        onDelete: deleteTesterCapability,
+                      ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
@@ -187,10 +311,12 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 class _SettingsBody extends StatelessWidget {
+  final bool usesMessageBus;
   final FrontendRuntimeConfig runtimeConfig;
   final String runtimeConfigError;
 
   const _SettingsBody({
+    required this.usesMessageBus,
     required this.runtimeConfig,
     required this.runtimeConfigError,
   });
@@ -206,7 +332,10 @@ class _SettingsBody extends StatelessWidget {
       spacing: 12,
       runSpacing: 12,
       children: [
-        const _SettingTile(label: 'API Base URL', value: apiBaseUrl),
+        _SettingTile(
+          label: '数据通道',
+          value: usesMessageBus ? '消息总线' : 'REST 诊断通道',
+        ),
         _SettingTile(label: 'Frontend Config', value: configStatus),
         const _SettingTile(
           label: 'Remote Agent',
@@ -238,6 +367,526 @@ class _SettingsBody extends StatelessWidget {
             label: 'Codex Workdir', value: 'EVOFORGE_CODEX_WORKDIR'),
       ],
     );
+  }
+}
+
+String _resolveTesterProjectKey(DeviceStatus status, String current) {
+  final keys = status.codexTask.workspaces.map((item) => item.key).toList();
+  if (keys.contains(current)) return current;
+  if (keys.contains(status.codexTask.defaultWorkspace)) {
+    return status.codexTask.defaultWorkspace;
+  }
+  return keys.isEmpty ? status.codexTask.defaultWorkspace : keys.first;
+}
+
+class _TesterCapabilityPlaceholder extends StatelessWidget {
+  const _TesterCapabilityPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.fact_check),
+      title: const Text('测试员能力库'),
+      subtitle: const Text('等待设备状态'),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+class _TesterCapabilitySection extends StatelessWidget {
+  final DeviceStatus status;
+  final String projectKey;
+  final List<TesterCommandStatus> capabilities;
+  final bool loading;
+  final ValueChanged<String> onProjectChanged;
+  final Future<void> Function() onRefresh;
+  final VoidCallback onDiscover;
+  final VoidCallback onModelDiscover;
+  final VoidCallback onAdd;
+  final ValueChanged<TesterCommandStatus> onEdit;
+  final ValueChanged<TesterCommandStatus> onDelete;
+
+  const _TesterCapabilitySection({
+    required this.status,
+    required this.projectKey,
+    required this.capabilities,
+    required this.loading,
+    required this.onProjectChanged,
+    required this.onRefresh,
+    required this.onDiscover,
+    required this.onModelDiscover,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final workspaces = status.codexTask.workspaces;
+    final selected = workspaces.any((item) => item.key == projectKey)
+        ? projectKey
+        : workspaces.isEmpty
+            ? projectKey
+            : workspaces.first.key;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '测试员能力库',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            IconButton(
+              onPressed: loading ? null : onRefresh,
+              icon: const Icon(Icons.refresh),
+              tooltip: '刷新',
+            ),
+            FilledButton.icon(
+              onPressed: loading || selected.isEmpty ? null : onDiscover,
+              icon: const Icon(Icons.auto_fix_high),
+              label: const Text('自动发现'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: loading || selected.isEmpty ? null : onModelDiscover,
+              icon: const Icon(Icons.psychology),
+              label: const Text('模型优化'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: selected.isEmpty ? null : onAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('新增'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
+              child: DropdownButtonFormField<String>(
+                initialValue: selected.isEmpty ? null : selected,
+                decoration: const InputDecoration(
+                  labelText: '项目',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.folder_open),
+                ),
+                items: workspaces
+                    .map(
+                      (workspace) => DropdownMenuItem(
+                        value: workspace.key,
+                        child: Text(workspace.key),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) onProjectChanged(value);
+                },
+              ),
+            ),
+            Chip(label: Text(status.tester.commandSource)),
+            Chip(
+                label: Text(
+                    status.tester.autoDiscoverEnabled ? '自动发现开启' : '自动发现关闭')),
+            Chip(
+                label: Text(
+                    status.tester.autoOptimizeEnabled ? '运行时优化开启' : '运行时优化关闭')),
+            if (status.tester.modelDiscoveryEnabled)
+              const Chip(label: Text('模型发现默认开启')),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (capabilities.isEmpty)
+          ListTile(
+            leading: const Icon(Icons.rule_folder),
+            title: const Text('还没有测试员能力记录'),
+            subtitle: const Text('点击自动发现，EvoForge 会根据项目文件和测试模板生成能力并入库。'),
+            shape: RoundedRectangleBorder(
+              side: BorderSide(color: Theme.of(context).dividerColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: capabilities
+                .map(
+                  (capability) => _TesterCapabilityTile(
+                    capability: capability,
+                    onEdit: () => onEdit(capability),
+                    onDelete: () => onDelete(capability),
+                  ),
+                )
+                .toList(),
+          ),
+      ],
+    );
+  }
+}
+
+class _TesterCapabilityTile extends StatelessWidget {
+  final TesterCommandStatus capability;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _TesterCapabilityTile({
+    required this.capability,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 430,
+      child: Card(
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          capability.name,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 2),
+                        SelectableText(
+                          capability.id,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit),
+                    tooltip: '编辑',
+                  ),
+                  IconButton(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: '删除',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  Chip(label: Text(capability.enabled ? '已启用' : '已停用')),
+                  if (capability.type.isNotEmpty)
+                    Chip(label: Text(capability.type)),
+                  if (capability.cost.isNotEmpty)
+                    Chip(label: Text('成本 ${capability.cost}')),
+                  if (capability.confidence.isNotEmpty)
+                    Chip(label: Text('信心 ${capability.confidence}')),
+                  if (capability.source.isNotEmpty)
+                    Chip(label: Text(capability.source)),
+                  if (capability.lastStatus.isNotEmpty)
+                    Chip(label: Text('最近 ${capability.lastStatus}')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _ModelField(
+                  label: '目录',
+                  value: capability.workingDirectory.isEmpty
+                      ? '.'
+                      : capability.workingDirectory),
+              _ModelField(label: '命令', value: capability.command),
+              if (capability.reason.isNotEmpty)
+                _ModelField(label: '原因', value: capability.reason),
+              if (capability.optimizationNotes.isNotEmpty)
+                _ModelField(label: '优化', value: capability.optimizationNotes),
+              _ModelField(
+                label: '统计',
+                value:
+                    '通过 ${capability.successCount} / 失败 ${capability.failureCount}',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TesterCapabilityDialog extends StatefulWidget {
+  final String projectKey;
+  final TesterCommandStatus? capability;
+
+  const _TesterCapabilityDialog({
+    required this.projectKey,
+    this.capability,
+  });
+
+  @override
+  State<_TesterCapabilityDialog> createState() =>
+      _TesterCapabilityDialogState();
+}
+
+class _TesterCapabilityDialogState extends State<_TesterCapabilityDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _typeController;
+  late final TextEditingController _workingDirectoryController;
+  late final TextEditingController _commandController;
+  late final TextEditingController _reasonController;
+  late final TextEditingController _coversController;
+  late final TextEditingController _tagsController;
+  late final TextEditingController _evidenceParserController;
+  late final TextEditingController _timeoutController;
+  late bool _enabled;
+  late String _cost;
+  late String _confidence;
+
+  @override
+  void initState() {
+    super.initState();
+    final capability = widget.capability;
+    _idController = TextEditingController(text: capability?.id ?? '');
+    _nameController = TextEditingController(text: capability?.name ?? '');
+    _typeController = TextEditingController(text: capability?.type ?? '');
+    _workingDirectoryController =
+        TextEditingController(text: capability?.workingDirectory ?? '.');
+    _commandController = TextEditingController(text: capability?.command ?? '');
+    _reasonController = TextEditingController(text: capability?.reason ?? '');
+    _coversController =
+        TextEditingController(text: capability?.covers.join(', ') ?? '');
+    _tagsController =
+        TextEditingController(text: capability?.tags.join(', ') ?? '');
+    _evidenceParserController =
+        TextEditingController(text: capability?.evidenceParser ?? '');
+    _timeoutController = TextEditingController(
+      text:
+          capability?.timeoutSeconds == null || capability!.timeoutSeconds == 0
+              ? ''
+              : capability.timeoutSeconds.toString(),
+    );
+    _enabled = capability?.enabled ?? true;
+    _cost = _choiceOrDefault(capability?.cost, 'medium');
+    _confidence = _choiceOrDefault(capability?.confidence, 'medium');
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    _typeController.dispose();
+    _workingDirectoryController.dispose();
+    _commandController.dispose();
+    _reasonController.dispose();
+    _coversController.dispose();
+    _tagsController.dispose();
+    _evidenceParserController.dispose();
+    _timeoutController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.capability != null;
+    return AlertDialog(
+      title: Text(editing ? '编辑测试员能力' : '新增测试员能力'),
+      content: SizedBox(
+        width: 560,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _idController,
+                  decoration: const InputDecoration(labelText: '能力 ID'),
+                  validator: _required('请填写能力 ID'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: '名称'),
+                  validator: _required('请填写名称'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _commandController,
+                  decoration: const InputDecoration(
+                    labelText: '命令',
+                    hintText: '例如 mvn test、flutter test',
+                  ),
+                  validator: _required('请填写命令'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _workingDirectoryController,
+                  decoration: const InputDecoration(
+                    labelText: '工作目录',
+                    hintText: '相对项目根目录，例如 backend、frontend、.',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _typeController,
+                  decoration: const InputDecoration(labelText: '类型'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _coversController,
+                  decoration: const InputDecoration(
+                    labelText: '覆盖范围',
+                    hintText: 'frontend, backend, message-bus',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _tagsController,
+                  decoration: const InputDecoration(labelText: '标签'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _cost,
+                        decoration: const InputDecoration(labelText: '成本'),
+                        items: const [
+                          DropdownMenuItem(value: 'low', child: Text('low')),
+                          DropdownMenuItem(
+                            value: 'medium',
+                            child: Text('medium'),
+                          ),
+                          DropdownMenuItem(value: 'high', child: Text('high')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) setState(() => _cost = value);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _confidence,
+                        decoration: const InputDecoration(labelText: '信心'),
+                        items: const [
+                          DropdownMenuItem(value: 'low', child: Text('low')),
+                          DropdownMenuItem(
+                            value: 'medium',
+                            child: Text('medium'),
+                          ),
+                          DropdownMenuItem(value: 'high', child: Text('high')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _confidence = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _evidenceParserController,
+                  decoration: const InputDecoration(labelText: '证据解析器'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _timeoutController,
+                  decoration: const InputDecoration(labelText: '超时秒数'),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _reasonController,
+                  decoration: const InputDecoration(labelText: '使用原因'),
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _enabled,
+                  onChanged: (value) => setState(() => _enabled = value),
+                  title: const Text('启用'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+
+  FormFieldValidator<String> _required(String message) {
+    return (value) => value == null || value.trim().isEmpty ? message : null;
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final payload = <String, Object?>{
+      'projectKey': widget.projectKey,
+      'id': _idController.text.trim(),
+      'name': _nameController.text.trim(),
+      'type': _typeController.text.trim(),
+      'workingDirectory': _workingDirectoryController.text.trim(),
+      'command': _commandController.text.trim(),
+      'enabled': _enabled,
+      'timeoutSeconds': int.tryParse(_timeoutController.text.trim().isEmpty
+              ? '0'
+              : _timeoutController.text.trim()) ??
+          0,
+      'reason': _reasonController.text.trim(),
+      'covers': _csv(_coversController.text),
+      'tags': _csv(_tagsController.text),
+      'cost': _cost,
+      'confidence': _confidence,
+      'evidenceParser': _evidenceParserController.text.trim(),
+      'source': 'manual',
+    };
+    Navigator.of(context).pop(payload);
+  }
+
+  static String _choiceOrDefault(String? value, String fallback) {
+    const choices = {'low', 'medium', 'high'};
+    return choices.contains(value) ? value! : fallback;
+  }
+
+  static List<String> _csv(String value) {
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
   }
 }
 

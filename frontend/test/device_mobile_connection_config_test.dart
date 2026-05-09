@@ -104,6 +104,16 @@ DeviceStatus _status() {
       workspaces: const [],
       timeoutSeconds: 600,
     ),
+    tester: TesterStatus(
+      enabled: true,
+      requiresApproval: false,
+      timeoutSeconds: 600,
+      commandSource: 'database-quality-capabilities',
+      autoDiscoverEnabled: true,
+      modelDiscoveryEnabled: false,
+      autoOptimizeEnabled: true,
+      projectCommands: const [],
+    ),
     capabilities: const ['approval_requests'],
   );
 }

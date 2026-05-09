@@ -3,6 +3,8 @@ package com.evoforge.device
 class DeviceProtocol {
     static final String TYPE_NATURAL_LANGUAGE_TASK = 'natural_language_task'
     static final String TYPE_CODEX_TASK = 'codex_task'
+    static final String TYPE_TESTER_TASK = 'tester_task'
+    static final String TYPE_HUMAN_RESPONSE = 'human_response'
     static final String TYPE_APPROVAL_DECISION = 'approval_decision'
     static final String TYPE_CLIENT_REQUEST = 'client_request'
 
@@ -17,11 +19,15 @@ class DeviceProtocol {
     static final String STATUS_RUNNING = 'running'
     static final String STATUS_COMPLETED = 'completed'
     static final String STATUS_FAILED = 'failed'
+    static final String STATUS_NEEDS_INPUT = 'needs_input'
+    static final String STATUS_INPUT_RECEIVED = 'input_received'
     static final String STATUS_CLIENT_RESPONSE = 'client_response'
     static final String STATUS_AGENT_PROGRESS = 'agent_progress'
 
     static final String CAPABILITY_NATURAL_LANGUAGE_TASK = TYPE_NATURAL_LANGUAGE_TASK
     static final String CAPABILITY_CODEX_TASK = TYPE_CODEX_TASK
+    static final String CAPABILITY_TESTER_TASK = TYPE_TESTER_TASK
+    static final String CAPABILITY_HUMAN_RESPONSE = TYPE_HUMAN_RESPONSE
     static final String CAPABILITY_APPROVAL_DECISION = TYPE_APPROVAL_DECISION
     static final String CAPABILITY_SKILL_EXECUTION = 'skill_execution'
     static final String CAPABILITY_LLM_RESPONSE = 'llm_response'
@@ -33,6 +39,8 @@ class DeviceProtocol {
         return [
             TYPE_NATURAL_LANGUAGE_TASK,
             TYPE_CODEX_TASK,
+            TYPE_TESTER_TASK,
+            TYPE_HUMAN_RESPONSE,
             TYPE_APPROVAL_DECISION,
             TYPE_CLIENT_REQUEST
         ]
@@ -46,6 +54,8 @@ class DeviceProtocol {
         return [
             CAPABILITY_NATURAL_LANGUAGE_TASK,
             CAPABILITY_CODEX_TASK,
+            CAPABILITY_TESTER_TASK,
+            CAPABILITY_HUMAN_RESPONSE,
             CAPABILITY_APPROVAL_DECISION,
             CAPABILITY_SKILL_EXECUTION,
             CAPABILITY_LLM_RESPONSE,

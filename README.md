@@ -41,8 +41,10 @@ Mobile-facing RabbitMQ Web STOMP settings are read from `frontend/config/evoforg
 ```bash
 cd frontend
 flutter pub get
-flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:18080
+flutter run -d chrome
 ```
+
+The console does not need a browser-to-backend HTTP route for normal use. It loads `frontend/config/evoforge.local.json`, connects to RabbitMQ Web STOMP or a JSON relay, sends UI reads/writes as signed `client_request` messages, and receives `client_response` events from the event exchange.
 
 ## Core APIs
 - `GET /api/skills` list skills
@@ -60,8 +62,18 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:18080
 - `GET /api/agent/conversations` list persisted agent conversation threads
 - `POST /api/agent/conversations` create a conversation thread
 - `GET /api/agent/conversations/{threadId}/turns` load same-thread user/assistant turns
+- `GET /api/codex/bridge/manifest` expose the small Codex-facing capability card
+- `POST /api/codex/bridge/query` return focused project context plus matching skill summaries
+- `GET /api/codex/bridge/skills` search the active EvoForge skill catalog for Codex
+- `POST /api/codex/bridge/questions/ask` let Codex ask a blocking user question and wait for a mobile `human_response`
+- `POST /api/codex/bridge/test-plan` return risk profile, quality routes, and persisted tester capabilities for a project/task
+- `POST /api/codex/bridge/test-run` run a selected route or selected persisted tester capability ids
+- `GET /api/device/tasks/{taskId}/events/page?limit=80&before=...` load long task timelines by cursor page for Codex/tester event logs
+- `GET /api/tester/capabilities?projectKey=...` list persisted tester capability records
+- `POST /api/tester/capabilities/discover` discover tester capabilities from project traits and save them
+- `POST /api/tester/capabilities`, `PUT /api/tester/capabilities/{projectKey}/{id}`, and `DELETE /api/tester/capabilities/{projectKey}/{id}` create, edit, or remove tester capability records
 
-The web console can also run without a direct HTTP path to the backend. Configure `frontend/config/evoforge.local.json` with RabbitMQ Web STOMP or a JSON relay route; when that connection is ready, console data fetches use `client_request` messages on the `.request` routing key and receive `client_response` events from `evoforge.events`. Long-running tasks stay on the `.command` routing key, so quick UI queries are not blocked behind agent execution. The REST endpoints remain useful for local development and diagnostics.
+The web console normally runs without a direct HTTP path to the backend. Configure `frontend/config/evoforge.local.json` with RabbitMQ Web STOMP or a JSON relay route; when that connection is ready, console data fetches use `client_request` messages on the `.request` routing key and receive `client_response` events from `evoforge.events`. Long-running tasks stay on the `.command` routing key, so quick UI queries are not blocked behind agent execution. The REST endpoints remain useful for local development and diagnostics.
 
 ## Remote device agent
 When enabled, EvoForge acts as a PC-side agent node:
@@ -86,7 +98,7 @@ Example command:
 }
 ```
 
-Supported command types are `natural_language_task`, `codex_task`, and `approval_decision`. Unknown command types are rejected with a `failed` event.
+Supported command types are `natural_language_task`, `codex_task`, `tester_task`, `client_request`, `approval_decision`, and `human_response`. Unknown command types are rejected with a `failed` event.
 Set `EVOFORGE_COMMAND_SIGNING_SECRET` to require RabbitMQ commands to carry a valid `attributes.signature` HMAC. REST dispatchers sign commands automatically when this secret is configured. Signed commands must include a fresh `createdAt`; tune the replay window with `EVOFORGE_COMMAND_SIGNATURE_TTL_SECONDS`.
 Signed commands also carry a `commandId`; repeated delivery of the same signed command id inside the replay window is rejected. In the default PostgreSQL mode this replay guard is persisted in `device_command_replay`, so it survives service restarts.
 The signature payload is canonical JSON over `commandId`, `taskId`, `userId`, `deviceId`, `type`, `text`, `createdAt`, `skillId`, `llm`, `codeModel`, `requiresApproval`, and `attributes` with `attributes.signature` excluded. The Flutter shared helper `DeviceCommandSigner` implements the same canonicalization for mobile clients.
@@ -107,6 +119,8 @@ final envelope = factory.naturalLanguageTask(
 
 // Publish envelope.payload as JSON to envelope.exchange with envelope.routingKey.
 ```
+Use `factory.testerTask(...)` when the client wants EvoForge to act as a standalone tester. Use `factory.codexTask(...)` with `attributes.evoforgeTester.enabled=true` when Codex should make the change first and then let EvoForge run the configured tester lane.
+Use `factory.humanResponse(...)` when Codex has called `/api/codex/bridge/questions/ask` and the mobile client needs to unblock it with a human answer. The original question arrives as a task event with `status=needs_input` and `payload.codexQuestion`; the reply command should carry `attributes.codexQuestionAnswer = { questionId, taskId, answer, actor }`.
 For inbound events, feed every RabbitMQ event JSON into `DeviceEventInbox`; it deduplicates by `eventId`, sorts each task timeline, derives recent task summaries, and captures heartbeat status snapshots for device capability updates.
 For a complete mobile state holder, wrap both helpers with `DeviceMobileSession`; pass `eventSigningSecret` when event signing is enabled so unsigned or tampered events are rejected before they update local task state.
 Mobile UI code should normally depend on `DeviceMobileController`; concrete RabbitMQ, WebSocket bridge, or other relay clients only need to implement `DeviceMessageTransport`.
@@ -162,12 +176,14 @@ Example RabbitMQ approval decision:
 ```
 
 ## Notes
-- Skills are stored in PostgreSQL by default and mirrored to `skills/<skill-id>/` as `manifest.json`, `skill.groovy`, and `SKILL.md`.
+- Skills are stored in PostgreSQL by default. The current skill code is also cached on local disk under `evoforge.skills.codeStoragePath` with a local checksum record; registry reloads compare the database checksum with the local checksum first and only read the database `code` column when the local copy is missing or stale. Saved skills are also mirrored to `skills/<skill-id>/` as `manifest.json`, `skill.groovy`, and `SKILL.md`.
 - Hot-reload runs every 5 seconds by default (configurable in `application.yml`).
 - Model providers are pluggable via `LlmProvider` and `CodeModelProvider` beans, and GPT/Claude/OpenAI-compatible configs can be managed from the Settings page.
 - Open-ended ordinary tasks run through a dynamic agent runtime: the LLM proposes multiple routes, executes one registered tool at a time, observes failures, replans, and persists reusable facts in the agent knowledge base.
+- Agent shell actions are not constrained by an allowed command list; `shell.run` accepts argv commands when `evoforge.agent.shellEnabled=true` and only applies the configured timeout. If all tool routes fail and a reusable capability is missing, EvoForge can propose a new skill to the mobile/command-center client, wait for confirmation or edited instructions, create the skill, and use it to continue the current task.
 - Frontend conversations carry a stable `threadId`; the backend stores same-thread turns as active memory and injects them into later planner/direct-chat prompts, while durable facts stay in the agent knowledge base.
-- Cross-network frontend/backend interaction is message-bus-first: clients publish `client_request`, `natural_language_task`, `codex_task`, and approval commands to the command exchange, while backend progress, observations, and final responses are published as events.
+- Cross-network frontend/backend interaction is message-bus-first: clients publish `client_request`, `natural_language_task`, `codex_task`, approval, and `human_response` commands to the command exchange, while backend progress, observations, questions, and final responses are published as events.
+- EvoForge can act as a tester through persisted quality capabilities. `TesterCapabilityService` discovers conventional commands from project traits, saves them in `tester_capabilities` or the file-backed capability store, optionally lets the configured model refine labels/tags/routes, and exposes the records in Settings for review and editing. Runtime execution still resolves configured project aliases and runs only stored capability ids whose executable and working directory pass validation; `evoforge.tester.projectCommands` and `defaultCommands` are compatibility fallback arrays only.
 - Audit and history logs are stored in PostgreSQL.
 - File-backed JSON storage remains available with `EVOFORGE_SKILL_STORAGE_BACKEND=file` or `evoforge.skills.storageBackend=file`.
 - RabbitMQ remote control is disabled by default; enable it with `EVOFORGE_DEVICE_AGENT_ENABLED=true`.
@@ -177,7 +193,9 @@ Example RabbitMQ approval decision:
 - Tune routing breadth with `evoforge.skills.routerCandidateLimit` and `evoforge.skills.routerMinCandidateScore`.
 - Local secrets are loaded from `~/.evoforge/application-secrets.yml`; see `docs/application-secrets.example.yml` for a copyable template.
 - For multiple Codex-maintained projects, configure `evoforge.codexTask.defaultWorkspace` and `evoforge.codexTask.workspaces` as a project-key whitelist, then send `attributes.projectKey` with `codex_task`.
-- When a `codex_task` opts into `attributes.evoforgeLearning`, EvoForge records the submitted task, selected project, Codex output/error, same-thread id, and previous latest change into project-scoped knowledge so later tasks can use the project change lineage.
+- When a `codex_task` opts into `attributes.evoforgeLearning`, EvoForge records the submitted task, selected project, Codex output/error, same-thread id, and previous latest change into project-scoped knowledge. Later Codex prompts do not receive the whole knowledge base; they receive a small Codex Bridge capability card and may call `/api/codex/bridge/query` for focused project context or `/api/codex/bridge/skills` for skill summaries. `ProjectKnowledgeContextService` builds each context pack using project scope, current task intent, tags, confidence, recency/latest-change signals, and the request `contextPolicy` budget.
+- When a `codex_task` opts into `attributes.evoforgeTester.enabled=true`, EvoForge builds a risk-aware quality route from persisted tester capabilities and runs it after Codex succeeds. Test progress appears as `payload.testerProgress`; the final report appears as `payload.testerRun` with risk profile, route, evidence packets, and repair prompt, is recorded in project knowledge as the latest test result, and updates tester capability run stats/confidence when auto-optimization is enabled.
+- When Codex is blocked on product intent, missing credentials, or another decision only the user can answer, it can call `/api/codex/bridge/questions/ask`. EvoForge publishes a `needs_input` event with `payload.codexQuestion`, the command center/mobile client replies with `human_response`, and the waiting Codex Bridge request returns the answer or times out after `evoforge.codexTask.questionTimeoutSeconds`.
 
 ## Example skill
 ```groovy

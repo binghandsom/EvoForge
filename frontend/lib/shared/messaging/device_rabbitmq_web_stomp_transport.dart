@@ -16,6 +16,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
   final String eventDestination;
   final Map<String, String> connectHeaders;
   final Map<String, String> subscribeHeaders;
+  final Duration heartbeatTolerance;
   final StreamController<DeviceTaskEvent> _events =
       StreamController<DeviceTaskEvent>.broadcast();
   final StreamController<Object> _protocolErrors =
@@ -24,6 +25,9 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
   final Completer<void> _connected = Completer<void>();
   final Completer<void> _subscribed = Completer<void>();
   late final StreamSubscription<Object?> _subscription;
+  Timer? _outgoingHeartbeatTimer;
+  Timer? _incomingHeartbeatTimer;
+  DateTime _lastReceivedAt = DateTime.now();
   bool _streamsClosed = false;
 
   DeviceRabbitMqWebStompTransport({
@@ -35,6 +39,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     this.subscriptionId = 'evoforge-mobile-events',
     this.connectHeaders = const {},
     this.subscribeHeaders = const {},
+    this.heartbeatTolerance = const Duration(seconds: 5),
   }) {
     _subscription = socket.messages.listen(
       _handleSocketMessage,
@@ -53,11 +58,16 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     String virtualHost = '/',
     Iterable<String>? protocols,
     String subscriptionId = 'evoforge-mobile-events',
-    Map<String, String> connectHeaders = const {},
+    Map<String, String> connectHeaders = const {
+      'heart-beat': '10000,10000',
+    },
     Map<String, String> subscribeHeaders = const {},
   }) {
     return DeviceRabbitMqWebStompTransport(
-      socket: DeviceWebSocketClient.connect(uri, protocols: protocols),
+      socket: DeviceWebSocketClient.connect(
+        uri,
+        protocols: protocols ?? DeviceStompCodec.defaultProtocols,
+      ),
       login: login,
       passcode: passcode,
       virtualHost: virtualHost,
@@ -79,11 +89,16 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     String virtualHost = '/',
     Iterable<String>? protocols,
     String subscriptionId = 'evoforge-mobile-events',
-    Map<String, String> connectHeaders = const {},
+    Map<String, String> connectHeaders = const {
+      'heart-beat': '10000,10000',
+    },
     Map<String, String> subscribeHeaders = const {},
   }) {
     return DeviceRabbitMqWebStompTransport(
-      socket: DeviceWebSocketClient.connect(uri, protocols: protocols),
+      socket: DeviceWebSocketClient.connect(
+        uri,
+        protocols: protocols ?? DeviceStompCodec.defaultProtocols,
+      ),
       login: login,
       passcode: passcode,
       virtualHost: virtualHost,
@@ -125,6 +140,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
     if (_connected.isCompleted && !_streamsClosed) {
       await _sendFrame(const DeviceStompFrame(command: 'DISCONNECT'));
     }
+    _cancelHeartbeats();
     await _subscription.cancel();
     await _closeStreams();
     await socket.close();
@@ -138,7 +154,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
         'host': virtualHost,
         'login': login,
         'passcode': passcode,
-        'heart-beat': '0,0',
+        'heart-beat': '10000,10000',
         ...connectHeaders,
       },
     ));
@@ -164,6 +180,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
   }
 
   void _handleSocketMessage(Object? message) {
+    _lastReceivedAt = DateTime.now();
     try {
       for (final frame in _parser.add(message)) {
         _handleFrame(frame);
@@ -179,6 +196,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
         if (!_connected.isCompleted) {
           _connected.complete();
         }
+        _startHeartbeats(frame.headers);
         unawaited(_sendSubscribe());
       case 'MESSAGE':
         _handleEventBody(frame.body);
@@ -212,6 +230,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
   }
 
   void _handleSocketError(Object error) {
+    _cancelHeartbeats();
     if (!_connected.isCompleted) {
       _connected.completeError(error);
     }
@@ -222,6 +241,7 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
   }
 
   void _handleSocketDone() {
+    _cancelHeartbeats();
     const error = DeviceStompProtocolException('RabbitMQ STOMP socket closed');
     if (!_connected.isCompleted) {
       _connected.completeError(error);
@@ -230,6 +250,53 @@ class DeviceRabbitMqWebStompTransport implements DeviceMessageTransport {
       _subscribed.completeError(error);
     }
     unawaited(_closeStreams());
+  }
+
+  void _startHeartbeats(Map<String, String> connectedHeaders) {
+    _cancelHeartbeats();
+    final clientHeartbeat = DeviceStompHeartbeat.parse(
+      connectHeaders['heart-beat'] ?? '10000,10000',
+    );
+    final serverHeartbeat = DeviceStompHeartbeat.parse(
+      connectedHeaders['heart-beat'] ?? '0,0',
+    );
+    final outgoingMs = DeviceStompHeartbeat.negotiatedInterval(
+      clientHeartbeat.sendMs,
+      serverHeartbeat.receiveMs,
+    );
+    final incomingMs = DeviceStompHeartbeat.negotiatedInterval(
+      serverHeartbeat.sendMs,
+      clientHeartbeat.receiveMs,
+    );
+    if (outgoingMs > 0) {
+      _outgoingHeartbeatTimer = Timer.periodic(
+        Duration(milliseconds: outgoingMs),
+        (_) => unawaited(socket.send('\n').catchError(_handleSocketError)),
+      );
+    }
+    if (incomingMs > 0) {
+      final interval = Duration(milliseconds: incomingMs);
+      _incomingHeartbeatTimer = Timer.periodic(interval, (_) {
+        final allowed = interval + interval + heartbeatTolerance;
+        if (DateTime.now().difference(_lastReceivedAt) <= allowed) {
+          return;
+        }
+        _handleSocketError(
+          DeviceStompProtocolException(
+            'RabbitMQ STOMP heartbeat timed out after ${allowed.inSeconds}s',
+          ),
+        );
+        unawaited(socket.close());
+        unawaited(_closeStreams());
+      });
+    }
+  }
+
+  void _cancelHeartbeats() {
+    _outgoingHeartbeatTimer?.cancel();
+    _outgoingHeartbeatTimer = null;
+    _incomingHeartbeatTimer?.cancel();
+    _incomingHeartbeatTimer = null;
   }
 
   Future<void> _closeStreams() async {
@@ -269,13 +336,18 @@ class DeviceStompFrame {
 }
 
 class DeviceStompCodec {
+  static const defaultProtocols = ['v12.stomp', 'v11.stomp', 'v10.stomp'];
+
   static String encode(DeviceStompFrame frame) {
     final buffer = StringBuffer()..writeln(frame.command);
+    final escapeHeaders = frame.command != 'CONNECT' &&
+        frame.command != 'CONNECTED' &&
+        frame.command != 'STOMP';
     for (final entry in frame.headers.entries) {
       buffer
-        ..write(_escapeHeader(entry.key))
+        ..write(escapeHeaders ? _escapeHeader(entry.key) : entry.key)
         ..write(':')
-        ..writeln(_escapeHeader(entry.value));
+        ..writeln(escapeHeaders ? _escapeHeader(entry.value) : entry.value);
     }
     buffer
       ..writeln()
@@ -297,14 +369,19 @@ class DeviceStompCodec {
     }
 
     final headers = <String, String>{};
+    final unescapeHeaders = headerLines.first != 'CONNECT' &&
+        headerLines.first != 'CONNECTED' &&
+        headerLines.first != 'STOMP';
     for (final line in headerLines.skip(1)) {
       if (line.isEmpty) continue;
       final colon = line.indexOf(':');
       if (colon <= 0) {
         throw FormatException('Invalid STOMP header: $line');
       }
-      headers[_unescapeHeader(line.substring(0, colon))] =
-          _unescapeHeader(line.substring(colon + 1));
+      final key = line.substring(0, colon);
+      final value = line.substring(colon + 1);
+      headers[unescapeHeaders ? _unescapeHeader(key) : key] =
+          unescapeHeaders ? _unescapeHeader(value) : value;
     }
 
     return DeviceStompFrame(
@@ -381,6 +458,29 @@ class DeviceStompFrameParser {
     while (_buffer.startsWith('\n') || _buffer.startsWith('\r')) {
       _buffer = _buffer.substring(1);
     }
+  }
+}
+
+class DeviceStompHeartbeat {
+  final int sendMs;
+  final int receiveMs;
+
+  const DeviceStompHeartbeat(this.sendMs, this.receiveMs);
+
+  static DeviceStompHeartbeat parse(String value) {
+    final parts = value.split(',');
+    if (parts.length != 2) {
+      return const DeviceStompHeartbeat(0, 0);
+    }
+    return DeviceStompHeartbeat(
+      int.tryParse(parts.first.trim()) ?? 0,
+      int.tryParse(parts.last.trim()) ?? 0,
+    );
+  }
+
+  static int negotiatedInterval(int firstMs, int secondMs) {
+    if (firstMs <= 0 || secondMs <= 0) return 0;
+    return firstMs > secondMs ? firstMs : secondMs;
   }
 }
 

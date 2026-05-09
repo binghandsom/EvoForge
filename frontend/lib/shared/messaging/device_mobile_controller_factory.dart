@@ -6,6 +6,7 @@ import 'device_mobile_connection_config.dart';
 import 'device_mobile_controller.dart';
 import 'device_mobile_session.dart';
 import 'device_rabbitmq_web_stomp_transport.dart';
+import 'device_reconnecting_message_transport.dart';
 
 typedef DeviceMessageTransportBuilder = DeviceMessageTransport Function(
   DeviceMobileConnectionConfig config,
@@ -38,22 +39,24 @@ class DeviceMobileControllerFactory {
   DeviceMessageTransport _transportFor(DeviceMobileConnectionConfig config) {
     return switch (config.transportKind) {
       DeviceMobileTransportKind.rabbitMqWebStomp =>
-        config.subscribeToDedicatedQueue
-            ? DeviceRabbitMqWebStompTransport.connectToQueue(
-                uri: config.uri,
-                login: config.rabbitMqLogin,
-                passcode: config.rabbitMqPasscode,
-                virtualHost: config.rabbitMqVirtualHost,
-                eventQueue: config.eventQueue,
-              )
-            : DeviceRabbitMqWebStompTransport.connect(
-                uri: config.uri,
-                login: config.rabbitMqLogin,
-                passcode: config.rabbitMqPasscode,
-                virtualHost: config.rabbitMqVirtualHost,
-                eventExchange: config.eventExchange,
-                eventRoutingKey: config.eventRoutingKey,
-              ),
+        DeviceReconnectingMessageTransport(
+          connector: () => config.subscribeToDedicatedQueue
+              ? DeviceRabbitMqWebStompTransport.connectToQueue(
+                  uri: config.uri,
+                  login: config.rabbitMqLogin,
+                  passcode: config.rabbitMqPasscode,
+                  virtualHost: config.rabbitMqVirtualHost,
+                  eventQueue: config.eventQueue,
+                )
+              : DeviceRabbitMqWebStompTransport.connect(
+                  uri: config.uri,
+                  login: config.rabbitMqLogin,
+                  passcode: config.rabbitMqPasscode,
+                  virtualHost: config.rabbitMqVirtualHost,
+                  eventExchange: config.eventExchange,
+                  eventRoutingKey: config.eventRoutingKey,
+                ),
+        ),
       DeviceMobileTransportKind.jsonRelay =>
         DeviceJsonRelayTransport.connect(config.uri),
     };

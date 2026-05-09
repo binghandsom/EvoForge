@@ -42,7 +42,7 @@ chmod 600 ~/.evoforge/application-secrets.yml
 
 Then edit `~/.evoforge/application-secrets.yml` and place machine-local values there. Because the import is `optional:`, EvoForge still starts when the file is missing. Values in the external file override defaults from `backend/src/main/resources/application.yml`; environment variables can still be used for deployment systems that prefer env-based secrets.
 
-Skill code, versions, audit events, and Git mirror metadata are stored in PostgreSQL. Flyway creates and upgrades the schema on startup. Each saved skill is also mirrored to the Git-backed skill library configured by `evoforge.skills.gitLibraryPath`.
+Skill metadata, current code fallback, versions, audit events, and Git mirror metadata are stored in PostgreSQL. Flyway creates and upgrades the schema on startup. The current code hot path is cached on local disk under `evoforge.skills.codeStoragePath`; reload checks the database checksum against the local checksum file before falling back to the database `code` column. Each saved skill is also mirrored to the Git-backed skill library configured by `evoforge.skills.gitLibraryPath`.
 
 ## RabbitMQ remote device agent
 The PC-side agent is disabled by default. Enable it when this EvoForge instance should receive mobile commands through a public RabbitMQ broker:
@@ -138,7 +138,7 @@ You can customize settings in `backend/src/main/resources/application.yml`. Stan
 ## Frontend build and serve
 1. `cd frontend`
 2. `flutter pub get`
-3. `flutter build web --dart-define=API_BASE_URL=http://<backend-host>:18080`
+3. `flutter build web`
 
 The build output is located at `frontend/build/web`. Serve this directory with any static file server.
 
@@ -146,9 +146,10 @@ The frontend loads mobile connection settings from `config/evoforge.local.json` 
 
 ```bash
 flutter build web \
-  --dart-define=API_BASE_URL=http://<backend-host>:18080 \
   --dart-define=EVOFORGE_FRONTEND_CONFIG_ASSET=config/evoforge.local.json
 ```
+
+Do not set a backend URL for the normal console path. The built frontend reads the configured message-bus asset and exchanges `client_request` / `client_response` messages through RabbitMQ Web STOMP or the JSON relay. REST endpoints stay available for local diagnostics, but they are not the browser console's default data channel.
 
 ## Health checks
 The backend exposes Spring Boot Actuator endpoints:

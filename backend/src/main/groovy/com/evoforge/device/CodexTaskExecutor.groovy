@@ -1,8 +1,11 @@
 package com.evoforge.device
 
-import com.evoforge.agent.AgentKnowledgeFact
 import com.evoforge.agent.AgentKnowledgeService
+import com.evoforge.agent.ProjectKnowledgeContext
+import com.evoforge.agent.ProjectKnowledgeContextService
 import com.evoforge.core.EvoForgeProperties
+import com.evoforge.tester.EvoForgeTesterService
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
@@ -11,7 +14,6 @@ import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Service
@@ -19,16 +21,26 @@ class CodexTaskExecutor {
     private static final Logger log = LoggerFactory.getLogger(CodexTaskExecutor)
 
     private final EvoForgeProperties properties
-    private final AgentKnowledgeService knowledgeService
+    private final ProjectKnowledgeContextService projectKnowledgeContextService
 
     CodexTaskExecutor(EvoForgeProperties properties) {
-        this(properties, null)
+        this(properties, null, null)
+    }
+
+    CodexTaskExecutor(EvoForgeProperties properties, AgentKnowledgeService knowledgeService) {
+        this(
+            properties,
+            knowledgeService,
+            knowledgeService ? new ProjectKnowledgeContextService(knowledgeService, new ObjectMapper()) : null
+        )
     }
 
     @Autowired
-    CodexTaskExecutor(EvoForgeProperties properties, AgentKnowledgeService knowledgeService) {
+    CodexTaskExecutor(EvoForgeProperties properties,
+                      AgentKnowledgeService knowledgeService,
+                      ProjectKnowledgeContextService projectKnowledgeContextService) {
         this.properties = properties
-        this.knowledgeService = knowledgeService
+        this.projectKnowledgeContextService = projectKnowledgeContextService
     }
 
     CodexTaskResult execute(DeviceCommandMessage command) {
@@ -118,31 +130,45 @@ class CodexTaskExecutor {
     private String enrichedPrompt(DeviceCommandMessage command, CodexWorkspace workspace) {
         String prompt = command.text ?: ''
         Map learning = learningConfig(command)
-        if (learning.enabled != true || !knowledgeService) {
+        Map tester = EvoForgeTesterService.testerConfig(command)
+        if (learning.enabled != true && tester.enabled != true) {
             return prompt
         }
         String sourceProjectKey = text(learning.sourceProjectKey) ?: workspace?.key ?: workspaceKey(command)
-        String query = [
-            sourceProjectKey,
-            command.text,
-            'change-lineage codex-output project-facts skills architecture errors'
-        ].findAll { it }.join(' ')
-        List<AgentKnowledgeFact> facts = knowledgeService.search(query, 6)
-            .findAll { fact -> !sourceProjectKey || fact.scope == "project:${sourceProjectKey}".toString() || (fact.tags ?: []).contains(sourceProjectKey) }
-            .take(6)
-        if (!facts) {
-            return prompt
-        }
-        String context = facts.collect { fact ->
-            "- ${fact.key} (${fact.source}, confidence ${String.format(Locale.ROOT, '%.2f', fact.confidence)}): ${compact(fact.value, 900)}"
-        }.join('\n')
+        ProjectKnowledgeContext context = learning.enabled == true && projectKnowledgeContextService
+            ? projectKnowledgeContextService.build(sourceProjectKey, command.text, learning)
+            : ProjectKnowledgeContext.empty()
         return """${prompt}
 
-EvoForge project memory for ${sourceProjectKey ?: 'current project'}:
-${context}
-
-Use this memory as supporting context. If it conflicts with the current task or repository evidence, verify and prefer the current repository.
+${bridgePromptBlock(sourceProjectKey, tester.enabled == true)}
+${context.hasEntries() ? '\n\n' + context.toPromptBlock() : ''}
 """.stripIndent()
+    }
+
+    private String bridgePromptBlock(String projectKey, boolean includeTester) {
+        String baseUrl = (properties.codexTask.bridgeBaseUrl ?: 'http://localhost:18080').trim()
+        if (baseUrl.endsWith('/')) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1)
+        }
+        String safeProjectKey = jsonEscape(projectKey ?: '')
+        String testerBlock = includeTester ? """
+- Ask EvoForge tester for a focused test plan:
+  curl -s -X POST '${baseUrl}/api/codex/bridge/test-plan' -H 'Content-Type: application/json' -d '{"projectKey":"${safeProjectKey}","task":"<current task>"}'
+- Run only configured tester command ids after edits:
+  curl -s -X POST '${baseUrl}/api/codex/bridge/test-run' -H 'Content-Type: application/json' -d '{"projectKey":"${safeProjectKey}","task":"<current task>","commandIds":["<id from plan>"]}'
+""" : ''
+        return """EvoForge bridge available:
+- Use this pull-based bridge when project memory or existing EvoForge skills could reduce uncertainty. Do not ask for broad dumps.
+- Query focused project context and matching skills:
+  curl -s -X POST '${baseUrl}/api/codex/bridge/query' -H 'Content-Type: application/json' -d '{"projectKey":"${safeProjectKey}","query":"<focused question>","includeContext":true,"includeSkills":true}'
+- Search active skills:
+  curl -s '${baseUrl}/api/codex/bridge/skills?query=<task>&limit=5'
+- Inspect bridge capabilities:
+  curl -s '${baseUrl}/api/codex/bridge/manifest?projectKey=${safeProjectKey}'
+- Ask the mobile user when you are blocked on intent, credentials, approval details, or product choice:
+  curl -s -X POST '${baseUrl}/api/codex/bridge/questions/ask' -H 'Content-Type: application/json' -d '{"projectKey":"${safeProjectKey}","taskId":"<current task id>","question":"<question for the user>","options":[]}'
+${testerBlock}
+Returned memory is supporting evidence only; current user request and repository files remain authoritative.""".stripIndent().trim()
     }
 
     private static Map learningConfig(DeviceCommandMessage command) {
@@ -160,9 +186,12 @@ Use this memory as supporting context. If it conflicts with the current task or 
         return result
     }
 
-    private static String compact(Object value, int limit) {
-        String normalized = (value ?: '').toString().replaceAll('\\s+', ' ').trim()
-        return normalized.length() > limit ? normalized.take(limit) + '...' : normalized
+    private static String jsonEscape(Object value) {
+        return text(value)
+            .replace('\\', '\\\\')
+            .replace('"', '\\"')
+            .replace('\n', '\\n')
+            .replace('\r', '\\r')
     }
 
     private static String readOutput(Process process) {

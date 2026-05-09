@@ -24,6 +24,7 @@ evoforge:
     storage: data/skills.json
     auditStorage: data/skill-audit.json
     historyStorage: data/skill-history.json
+    codeStoragePath: ${EVOFORGE_SKILL_CODE_STORAGE_PATH:data/skill-code-cache}
     gitLibraryEnabled: true
     gitLibraryBootstrapOnEmpty: true
     gitLibraryPath: ../skills
@@ -57,6 +58,7 @@ evoforge:
     eventSigningSecret: ${EVOFORGE_EVENT_SIGNING_SECRET:${EVOFORGE_COMMAND_SIGNING_SECRET:}}
     commandSignatureTtlSeconds: ${EVOFORGE_COMMAND_SIGNATURE_TTL_SECONDS:300}
     prefetch: ${EVOFORGE_DEVICE_AGENT_PREFETCH:1}
+    concurrentConsumers: ${EVOFORGE_DEVICE_AGENT_CONCURRENT_CONSUMERS:2}
     heartbeatSeconds: ${EVOFORGE_DEVICE_AGENT_HEARTBEAT_SECONDS:30}
   codexTask:
     enabled: ${EVOFORGE_CODEX_TASK_ENABLED:false}
@@ -65,9 +67,28 @@ evoforge:
     defaultWorkspace: ${EVOFORGE_CODEX_DEFAULT_WORKSPACE:}
     workingDirectory: ${EVOFORGE_CODEX_WORKDIR:.}
     workspaces: {}
+    bridgeBaseUrl: ${EVOFORGE_CODEX_BRIDGE_BASE_URL:http://localhost:${EVOFORGE_SERVER_PORT:18080}}
     promptArg: ${EVOFORGE_CODEX_PROMPT_ARG:}
     extraArgs: []
     timeoutSeconds: ${EVOFORGE_CODEX_TIMEOUT_SECONDS:600}
+    questionTimeoutSeconds: ${EVOFORGE_CODEX_QUESTION_TIMEOUT_SECONDS:1800}
+  tester:
+    enabled: ${EVOFORGE_TESTER_ENABLED:true}
+    requiresApproval: ${EVOFORGE_TESTER_REQUIRES_APPROVAL:false}
+    recordKnowledge: ${EVOFORGE_TESTER_RECORD_KNOWLEDGE:true}
+    autoRepairEnabled: ${EVOFORGE_TESTER_AUTO_REPAIR_ENABLED:false}
+    autoDiscoverEnabled: ${EVOFORGE_TESTER_AUTO_DISCOVER_ENABLED:true}
+    modelDiscoveryEnabled: ${EVOFORGE_TESTER_MODEL_DISCOVERY_ENABLED:false}
+    autoOptimizeEnabled: ${EVOFORGE_TESTER_AUTO_OPTIMIZE_ENABLED:true}
+    maxRepairAttempts: ${EVOFORGE_TESTER_MAX_REPAIR_ATTEMPTS:1}
+    timeoutSeconds: ${EVOFORGE_TESTER_TIMEOUT_SECONDS:600}
+    maxOutputChars: ${EVOFORGE_TESTER_MAX_OUTPUT_CHARS:20000}
+    capabilityStorage: ${EVOFORGE_TESTER_CAPABILITY_STORAGE:data/tester-capabilities.json}
+    # Tester capabilities are persisted in tester_capabilities and can be
+    # discovered/edited from the frontend. These legacy arrays remain empty by
+    # default and are used only as a compatibility fallback.
+    defaultCommands: []
+    projectCommands: {}
   models:
     defaultLlm: mock-llm
     defaultCodeModel: mock-code
@@ -82,19 +103,23 @@ evoforge:
     shellEnabled: ${EVOFORGE_AGENT_SHELL_ENABLED:true}
     shellTimeoutSeconds: ${EVOFORGE_AGENT_SHELL_TIMEOUT_SECONDS:10}
     fileListLimit: ${EVOFORGE_AGENT_FILE_LIST_LIMIT:200}
-    shellAllowedCommands:
-      - pwd
-      - whoami
-      - id
-      - uname
-      - sw_vers
-      - ls
-      - find
-      - stat
-      - mdls
-      - xdg-user-dir
-      - cmd
-      - powershell
+    skillFallbackEnabled: ${EVOFORGE_AGENT_SKILL_FALLBACK_ENABLED:true}
+    skillProposalTimeoutSeconds: ${EVOFORGE_AGENT_SKILL_PROPOSAL_TIMEOUT_SECONDS:1800}
+  selfLearning:
+    enabled: ${EVOFORGE_SELF_LEARNING_ENABLED:true}
+    autoStart: ${EVOFORGE_SELF_LEARNING_AUTO_START:true}
+    resourceMode: ${EVOFORGE_SELF_LEARNING_RESOURCE_MODE:adaptive}
+    networkLearningEnabled: ${EVOFORGE_SELF_LEARNING_NETWORK_ENABLED:true}
+    hardwareAccelerationEnabled: ${EVOFORGE_SELF_LEARNING_HARDWARE_ACCELERATION_ENABLED:true}
+    preferLocalHardware: ${EVOFORGE_SELF_LEARNING_PREFER_LOCAL_HARDWARE:true}
+    targetImprovementCycleMinutes: ${EVOFORGE_SELF_LEARNING_TARGET_CYCLE_MINUTES:30}
+    maxParallelLearningTasks: ${EVOFORGE_SELF_LEARNING_MAX_PARALLEL_TASKS:4}
+    maxNetworkFetchesPerCycle: ${EVOFORGE_SELF_LEARNING_MAX_NETWORK_FETCHES_PER_CYCLE:16}
+    maxCandidateSourcesPerTopic: ${EVOFORGE_SELF_LEARNING_MAX_CANDIDATE_SOURCES_PER_TOPIC:8}
+    maxHardwareUtilizationPercent: ${EVOFORGE_SELF_LEARNING_MAX_HARDWARE_UTILIZATION_PERCENT:85}
+    maxRecentActivities: ${EVOFORGE_SELF_LEARNING_MAX_RECENT_ACTIVITIES:80}
+    maxMilestones: ${EVOFORGE_SELF_LEARNING_MAX_MILESTONES:30}
+    maxInterfaceExamples: ${EVOFORGE_SELF_LEARNING_MAX_INTERFACE_EXAMPLES:12}
 
 management:
   endpoints:

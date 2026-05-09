@@ -28,7 +28,7 @@ class SkillLibraryBootstrap {
         if (!properties.skills.gitLibraryEnabled || !properties.skills.gitLibraryBootstrapOnEmpty) {
             return
         }
-        if (!store.loadAll().isEmpty()) {
+        if (!store.loadAllSummaries().isEmpty()) {
             return
         }
 

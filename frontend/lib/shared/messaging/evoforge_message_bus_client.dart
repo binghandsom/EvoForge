@@ -53,6 +53,14 @@ class EvoForgeMessageBusClient {
   Future<void> close() async {
     await _subscription.cancel();
     await _events.close();
+    try {
+      final closeResult = (transport as dynamic).close();
+      if (closeResult is Future) {
+        await closeResult;
+      }
+    } on NoSuchMethodError {
+      return;
+    }
   }
 }
 

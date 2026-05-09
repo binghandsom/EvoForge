@@ -2,8 +2,11 @@ package com.evoforge.device
 
 import com.evoforge.api.AgentRequest
 import com.evoforge.agent.ProjectLearningService
+import com.evoforge.codex.CodexQuestionBridgeService
 import com.evoforge.core.AgentService
 import com.evoforge.core.EvoForgeProperties
+import com.evoforge.tester.EvoForgeTesterService
+import com.evoforge.tester.TesterRunResult
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -18,6 +21,8 @@ class DeviceAgentExecutor {
     private final DeviceTaskApprovalService approvalService
     private final DeviceEventPublisher eventPublisher
     private final ProjectLearningService projectLearningService
+    private final CodexQuestionBridgeService questionBridgeService
+    private final EvoForgeTesterService testerService
     private final EvoForgeProperties properties
 
     DeviceAgentExecutor(AgentService agentService,
@@ -26,6 +31,8 @@ class DeviceAgentExecutor {
                         DeviceTaskApprovalService approvalService,
                         DeviceEventPublisher eventPublisher,
                         ProjectLearningService projectLearningService,
+                        CodexQuestionBridgeService questionBridgeService,
+                        EvoForgeTesterService testerService,
                         EvoForgeProperties properties) {
         this.agentService = agentService
         this.codexTaskExecutor = codexTaskExecutor
@@ -33,6 +40,8 @@ class DeviceAgentExecutor {
         this.approvalService = approvalService
         this.eventPublisher = eventPublisher
         this.projectLearningService = projectLearningService
+        this.questionBridgeService = questionBridgeService
+        this.testerService = testerService
         this.properties = properties
     }
 
@@ -88,6 +97,14 @@ class DeviceAgentExecutor {
                 runCodexTask(normalized)
                 return
             }
+            if (normalized.type == DeviceProtocol.TYPE_TESTER_TASK) {
+                runTesterTask(normalized)
+                return
+            }
+            if (normalized.type == DeviceProtocol.TYPE_HUMAN_RESPONSE) {
+                runHumanResponse(normalized)
+                return
+            }
             def response = agentService.respond(new AgentRequest(
                 input: normalized.text,
                 skillId: normalized.skillId,
@@ -123,18 +140,71 @@ class DeviceAgentExecutor {
     private void runCodexTask(DeviceCommandMessage command) {
         CodexTaskResult result = codexTaskExecutor.execute(command)
         Map<String, Object> learning = projectLearningService.recordCodexTask(command, result)
-        String level = result.status == DeviceProtocol.STATUS_FAILED ? 'error' : result.status == DeviceProtocol.STATUS_NEEDS_APPROVAL ? 'warn' : 'info'
+        TesterRunResult testerResult = null
+        Map testerConfig = EvoForgeTesterService.testerConfig(command)
+        if (testerConfig.enabled == true && result.status == DeviceProtocol.STATUS_COMPLETED) {
+            publish(command, DeviceProtocol.STATUS_AGENT_PROGRESS, DeviceProtocol.STATUS_RUNNING, 'info', 'EvoForge tester lane started', null, [testerProgress: [phase: 'started']], false)
+            testerResult = testerService.runAfterCodex(command, result) { Map progress ->
+                publish(
+                    command,
+                    DeviceProtocol.STATUS_AGENT_PROGRESS,
+                    DeviceProtocol.STATUS_RUNNING,
+                    progress.phase == 'command_failed' ? 'error' : 'info',
+                    progress.message?.toString() ?: 'EvoForge tester progress',
+                    progress.output?.toString(),
+                    [testerProgress: progress],
+                    false
+                )
+            }
+        }
+        String finalStatus = testerResult?.status == DeviceProtocol.STATUS_FAILED ? DeviceProtocol.STATUS_FAILED : result.status
+        String finalMessage = testerResult?.status == DeviceProtocol.STATUS_FAILED
+            ? 'Codex task completed; EvoForge tester found failures'
+            : testerResult?.status == DeviceProtocol.STATUS_COMPLETED
+                ? 'Codex task completed; EvoForge tester passed'
+                : result.message
+        String level = finalStatus == DeviceProtocol.STATUS_FAILED ? 'error' : finalStatus == DeviceProtocol.STATUS_NEEDS_APPROVAL ? 'warn' : 'info'
         publish(
             command,
-            result.status,
-            result.status,
+            finalStatus,
+            finalStatus,
             level,
-            result.message,
+            finalMessage,
             result.output,
             [
                 commandType    : command.type,
                 projectKey     : command.attributes?.projectKey,
-                projectLearning: learning?.enabled == true ? learning : null
+                projectLearning: learning?.enabled == true ? learning : null,
+                testerRun      : testerResult?.toMap(true)
+            ].findAll { it.value != null } as Map<String, Object>,
+            testerResult?.recoverable ?: result.recoverable
+        )
+    }
+
+    private void runTesterTask(DeviceCommandMessage command) {
+        TesterRunResult result = testerService.run(command) { Map progress ->
+            publish(
+                command,
+                DeviceProtocol.STATUS_AGENT_PROGRESS,
+                DeviceProtocol.STATUS_RUNNING,
+                progress.phase == 'command_failed' ? 'error' : 'info',
+                progress.message?.toString() ?: 'EvoForge tester progress',
+                progress.output?.toString(),
+                [testerProgress: progress],
+                false
+            )
+        }
+        publish(
+            command,
+            result.status,
+            result.status,
+            result.status == DeviceProtocol.STATUS_FAILED ? 'error' : 'info',
+            result.message,
+            result.output,
+            [
+                commandType: command.type,
+                projectKey : command.attributes?.projectKey,
+                testerRun  : result.toMap(true)
             ].findAll { it.value != null } as Map<String, Object>,
             result.recoverable
         )
@@ -151,6 +221,23 @@ class DeviceAgentExecutor {
             null,
             [clientResponse: response],
             false
+        )
+    }
+
+    private void runHumanResponse(DeviceCommandMessage command) {
+        Map<String, Object> response = questionBridgeService.answer(command)
+        publish(
+            command,
+            DeviceProtocol.STATUS_INPUT_RECEIVED,
+            DeviceProtocol.STATUS_COMPLETED,
+            response.delivered == true ? 'info' : 'warn',
+            response.delivered == true ? 'Human response delivered to waiting question' : 'Human response recorded but no waiting question was found',
+            null,
+            [
+                commandType: command.type,
+                codexQuestionAnswer: response
+            ] as Map<String, Object>,
+            response.delivered != true
         )
     }
 
@@ -194,7 +281,9 @@ class DeviceAgentExecutor {
         if (command.attributes?.approvalGranted == true) {
             return false
         }
-        return command.requiresApproval || (command.type == DeviceProtocol.TYPE_CODEX_TASK && properties.codexTask.requiresApproval)
+        return command.requiresApproval ||
+            (command.type == DeviceProtocol.TYPE_CODEX_TASK && properties.codexTask.requiresApproval) ||
+            (command.type == DeviceProtocol.TYPE_TESTER_TASK && properties.tester.requiresApproval)
     }
 
     private boolean isForThisDevice(DeviceCommandMessage command) {

@@ -38,9 +38,19 @@ class FileSkillStore implements SkillStore {
     }
 
     @Override
+    List<SkillDefinition> loadAllSummaries() {
+        return loadAll()
+    }
+
+    @Override
     Optional<SkillDefinition> findById(String id) {
         def all = loadAll()
         return Optional.ofNullable(all.find { it.id == id })
+    }
+
+    @Override
+    Optional<SkillDefinition> findSummaryById(String id) {
+        return findById(id)
     }
 
     @Override

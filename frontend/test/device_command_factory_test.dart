@@ -84,4 +84,48 @@ void main() {
     expect(request['method'], 'agent.conversations.list');
     expect((request['params'] as Map)['limit'], 20);
   });
+
+  test('builds tester task envelope', () {
+    final factory = DeviceCommandFactory(
+      userId: 'user-1',
+      deviceId: 'pc-1',
+      signer: DeviceCommandSigner(secret: ''),
+      clock: () => DateTime.parse('2026-05-07T00:00:00Z'),
+      idFactory: () => 'tester-id',
+    );
+
+    final envelope = factory.testerTask(
+      text: '验证刚才的改动',
+      attributes: {'projectKey': 'evoforge'},
+    );
+
+    expect(envelope.type, DeviceCommandType.testerTask);
+    expect(envelope.payload['type'], DeviceCommandType.testerTask);
+    expect(envelope.payload['requiresApproval'], isFalse);
+    expect((envelope.payload['attributes'] as Map)['projectKey'], 'evoforge');
+  });
+
+  test('builds human response envelope for Codex questions', () {
+    final factory = DeviceCommandFactory(
+      userId: 'user-1',
+      deviceId: 'pc-1',
+      signer: DeviceCommandSigner(secret: ''),
+      clock: () => DateTime.parse('2026-05-07T00:00:00Z'),
+      idFactory: () => 'human-id',
+    );
+
+    final envelope = factory.humanResponse(
+      questionId: 'question-1',
+      questionTaskId: 'task-1',
+      answer: '选第二个方案',
+    );
+
+    expect(envelope.type, DeviceCommandType.humanResponse);
+    expect(envelope.taskId, 'task-1');
+    final attributes = envelope.payload['attributes'] as Map;
+    final answer = attributes['codexQuestionAnswer'] as Map;
+    expect(answer['questionId'], 'question-1');
+    expect(answer['answer'], '选第二个方案');
+    expect(answer['actor'], 'mobile');
+  });
 }

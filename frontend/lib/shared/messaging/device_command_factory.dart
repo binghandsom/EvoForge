@@ -59,6 +59,21 @@ class DeviceCommandFactory {
     );
   }
 
+  DeviceCommandEnvelope testerTask({
+    required String text,
+    bool requiresApproval = false,
+    String? taskId,
+    Map<String, Object?> attributes = const {},
+  }) {
+    return _command(
+      type: DeviceCommandType.testerTask,
+      text: text,
+      requiresApproval: requiresApproval,
+      taskId: taskId,
+      attributes: attributes,
+    );
+  }
+
   DeviceCommandEnvelope approvalDecision({
     required String taskId,
     required String decision,
@@ -76,6 +91,33 @@ class DeviceCommandFactory {
         'decision': decision,
         'actor': actor,
         if (note != null && note.isNotEmpty) 'note': note,
+      },
+    );
+  }
+
+  DeviceCommandEnvelope humanResponse({
+    required String questionId,
+    required String answer,
+    String? questionTaskId,
+    String actor = 'mobile',
+    String? note,
+    Map<String, Object?> attributes = const {},
+  }) {
+    return _command(
+      type: DeviceCommandType.humanResponse,
+      taskId: questionTaskId,
+      text: answer,
+      requiresApproval: false,
+      attributes: {
+        ...attributes,
+        'codexQuestionAnswer': {
+          'questionId': questionId,
+          if (questionTaskId != null && questionTaskId.isNotEmpty)
+            'taskId': questionTaskId,
+          'answer': answer,
+          'actor': actor,
+          if (note != null && note.isNotEmpty) 'note': note,
+        },
       },
     );
   }

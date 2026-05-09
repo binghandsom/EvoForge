@@ -22,6 +22,11 @@ class DeviceStatusServiceTest {
             evoforge: '/projects/evoforge',
             app     : '/projects/app'
         ]
+        properties.tester.projectCommands = [
+            evoforge: [
+                new EvoForgeProperties.TesterCommand(id: 'backend', name: 'Backend Tests', workingDirectory: 'backend', command: 'mvn test')
+            ]
+        ]
 
         Map<String, Object> status = new DeviceStatusService(properties).status()
 
@@ -42,5 +47,8 @@ class DeviceStatusServiceTest {
             [key: 'app', path: '/projects/app'],
             [key: 'evoforge', path: '/projects/evoforge']
         ], (status.codexTask as Map).workspaces)
+        assertEquals(true, (status.tester as Map).enabled)
+        assertEquals('legacy-config-fallback', (status.tester as Map).commandSource)
+        assertEquals('evoforge', ((status.tester as Map).projectCommands as List).first().projectKey)
     }
 }

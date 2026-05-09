@@ -65,6 +65,18 @@ class DeviceMobileSession {
     );
   }
 
+  DeviceCommandEnvelope sendTesterTask({
+    required String text,
+    bool requiresApproval = false,
+    Map<String, Object?> attributes = const {},
+  }) {
+    return commandFactory.testerTask(
+      text: text,
+      requiresApproval: requiresApproval,
+      attributes: attributes,
+    );
+  }
+
   DeviceCommandEnvelope approveTask(String taskId, {String? note}) {
     return commandFactory.approvalDecision(
       taskId: taskId,
@@ -77,6 +89,22 @@ class DeviceMobileSession {
     return commandFactory.approvalDecision(
       taskId: taskId,
       decision: DeviceApprovalDecision.reject,
+      note: note,
+    );
+  }
+
+  DeviceCommandEnvelope answerCodexQuestion({
+    required String questionId,
+    required String answer,
+    String? questionTaskId,
+    String actor = 'mobile',
+    String? note,
+  }) {
+    return commandFactory.humanResponse(
+      questionId: questionId,
+      answer: answer,
+      questionTaskId: questionTaskId,
+      actor: actor,
       note: note,
     );
   }

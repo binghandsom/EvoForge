@@ -44,3 +44,45 @@ class DeviceTaskEvent {
     );
   }
 }
+
+class DeviceTaskEventPage {
+  final List<DeviceTaskEvent> items;
+  final bool hasMoreBefore;
+  final bool hasMoreAfter;
+  final String beforeCursor;
+  final String afterCursor;
+  final int limit;
+
+  DeviceTaskEventPage({
+    required this.items,
+    required this.hasMoreBefore,
+    required this.hasMoreAfter,
+    required this.beforeCursor,
+    required this.afterCursor,
+    required this.limit,
+  });
+
+  factory DeviceTaskEventPage.fromJson(Map<String, dynamic> json) {
+    return DeviceTaskEventPage(
+      items: (json['items'] as List<dynamic>? ?? [])
+          .map((item) => DeviceTaskEvent.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      hasMoreBefore: json['hasMoreBefore'] == true,
+      hasMoreAfter: json['hasMoreAfter'] == true,
+      beforeCursor: json['beforeCursor']?.toString() ?? '',
+      afterCursor: json['afterCursor']?.toString() ?? '',
+      limit: int.tryParse(json['limit']?.toString() ?? '') ?? 80,
+    );
+  }
+
+  factory DeviceTaskEventPage.fromItems(List<DeviceTaskEvent> items) {
+    return DeviceTaskEventPage(
+      items: items,
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+      beforeCursor: '',
+      afterCursor: '',
+      limit: items.length,
+    );
+  }
+}

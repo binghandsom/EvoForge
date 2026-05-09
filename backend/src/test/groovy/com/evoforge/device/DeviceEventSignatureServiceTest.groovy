@@ -36,6 +36,53 @@ class DeviceEventSignatureServiceTest {
         assertFalse(event.payload.containsKey('eventSignature'))
     }
 
+    @Test
+    void signsClientResponsePayloadContainingInstantBackedViews() {
+        EvoForgeProperties properties = new EvoForgeProperties()
+        properties.deviceAgent.eventSigningSecret = 'unit-test-secret'
+        DeviceEventSignatureService service = new DeviceEventSignatureService(properties)
+        DeviceTaskSummary summary = new DeviceTaskSummary(
+            taskId: 'task-2',
+            userId: 'user-1',
+            deviceId: 'pc-1',
+            type: DeviceProtocol.TYPE_CLIENT_REQUEST,
+            status: DeviceProtocol.STATUS_COMPLETED,
+            level: 'info',
+            message: 'ok',
+            eventCount: 2,
+            firstEventAt: Instant.parse('2026-05-09T05:24:00Z'),
+            lastEventAt: Instant.parse('2026-05-09T05:24:02Z')
+        )
+        DeviceTaskEvent event = new DeviceTaskEvent(
+            eventId: 'event-client-response',
+            taskId: 'request-1',
+            userId: 'user-1',
+            deviceId: 'pc-1',
+            type: DeviceProtocol.STATUS_CLIENT_RESPONSE,
+            status: DeviceProtocol.STATUS_COMPLETED,
+            level: 'info',
+            message: 'Client request completed: device.tasks.list',
+            recoverable: false,
+            payload: [
+                clientResponse: [
+                    requestId: 'request-1',
+                    method   : 'device.tasks.list',
+                    ok       : true,
+                    data     : [summary]
+                ]
+            ],
+            createdAt: Instant.parse('2026-05-09T05:24:03Z')
+        )
+
+        service.sign(event)
+
+        assertNotNull(event.payload.eventSignature)
+        assertTrue(service.verify(event))
+        String canonical = service.canonicalPayload(event)
+        assertTrue(canonical.contains('"firstEventAt":"2026-05-09T05:24:00Z"'))
+        assertTrue(canonical.contains('"lastEventAt":"2026-05-09T05:24:02Z"'))
+    }
+
     private static DeviceTaskEvent event() {
         return new DeviceTaskEvent(
             eventId: 'event-1',

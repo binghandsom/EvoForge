@@ -55,7 +55,7 @@ class SkillService {
     }
 
     List<SkillDefinition> list() {
-        return store.loadAll()
+        return store.loadAllSummaries()
     }
 
     SkillDefinition get(String id) {

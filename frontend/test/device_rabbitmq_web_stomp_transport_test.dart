@@ -59,13 +59,15 @@ void main() {
     expect(_sentCommands(socket), ['CONNECT']);
     socket.emit(DeviceStompCodec.encode(const DeviceStompFrame(
       command: 'CONNECTED',
-      headers: {'version': '1.2'},
+      headers: {'version': '1.2', 'heart-beat': '0,0'},
     )));
     await transport.connected;
     await pumpEventQueue();
     expect(_sentCommands(socket), ['CONNECT', 'SUBSCRIBE']);
 
     final subscribe = _decodeSent(socket.sent[1]);
+    final connect = _decodeSent(socket.sent[0]);
+    expect(connect.headers['heart-beat'], '10000,10000');
     expect(subscribe.headers['destination'],
         '/exchange/evoforge.events/user.user-1.device.pc-1.event');
     expect(subscribe.headers['ack'], 'auto');
@@ -93,6 +95,33 @@ void main() {
 
     await subscription.cancel();
     await transport.close();
+  });
+
+  test('does not escape CONNECT headers for RabbitMQ authentication', () {
+    final encoded = DeviceStompCodec.encode(const DeviceStompFrame(
+      command: 'CONNECT',
+      headers: {
+        'login': 'mobile:user',
+        'passcode': r'a\b:c',
+        'host': 'evoforge',
+      },
+    ));
+
+    expect(encoded, contains('login:mobile:user\n'));
+    expect(encoded, contains(r'passcode:a\b:c'));
+    final decoded = DeviceStompCodec.decode(
+      encoded.substring(0, encoded.length - 1),
+    );
+    expect(decoded.headers['login'], 'mobile:user');
+    expect(decoded.headers['passcode'], r'a\b:c');
+  });
+
+  test('negotiates heartbeat intervals only when both peers support them', () {
+    expect(DeviceStompHeartbeat.parse('10000,20000').sendMs, 10000);
+    expect(DeviceStompHeartbeat.parse('10000,20000').receiveMs, 20000);
+    expect(DeviceStompHeartbeat.negotiatedInterval(10000, 5000), 10000);
+    expect(DeviceStompHeartbeat.negotiatedInterval(0, 5000), 0);
+    expect(DeviceStompHeartbeat.negotiatedInterval(5000, 0), 0);
   });
 
   test('parses frames split across socket chunks', () {

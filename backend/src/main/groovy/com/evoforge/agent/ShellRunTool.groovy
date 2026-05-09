@@ -4,7 +4,6 @@ import com.evoforge.core.EvoForgeProperties
 import org.springframework.stereotype.Component
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 @Component
@@ -20,7 +19,7 @@ class ShellRunTool implements AgentTool {
 
     @Override
     String description() {
-        'Run a low-risk local command as an argv array. The executor enforces an allowed command list and timeout. Use this for discovery commands such as uname, sw_vers, pwd, whoami, ls, stat, find, or xdg-user-dir.'
+        'Run a local command as an argv array. No command allowlist is enforced; the executor only applies the shell enable switch and timeout.'
     }
 
     @Override
@@ -45,10 +44,6 @@ class ShellRunTool implements AgentTool {
         if (argv.isEmpty()) {
             return AgentToolResult.fail('argv is required')
         }
-        String command = Path.of(argv.first()).fileName.toString()
-        if (!allowed(command)) {
-            return AgentToolResult.fail("Command is not allowed: ${command}".toString(), [allowed: properties.agent.shellAllowedCommands])
-        }
 
         int timeout = Math.max(1, Math.min(intArg(args.timeout, properties.agent.shellTimeoutSeconds), 60))
         ProcessBuilder builder = new ProcessBuilder(argv)
@@ -67,15 +62,21 @@ class ShellRunTool implements AgentTool {
         if (output.length() > maxLength) {
             output = output.take(maxLength) + '\n[truncated]'
         }
-        return AgentToolResult.ok([
+        Map<String, Object> payload = [
             argv    : argv,
             exitCode: process.exitValue(),
             output  : output
-        ], [exitCode: process.exitValue()])
-    }
-
-    private boolean allowed(String command) {
-        return (properties.agent.shellAllowedCommands ?: []).any { it == command }
+        ] as Map<String, Object>
+        int exitCode = process.exitValue()
+        if (exitCode != 0) {
+            return new AgentToolResult(
+                success: false,
+                output: payload,
+                error: "Command exited with code ${exitCode}".toString(),
+                meta: [exitCode: exitCode]
+            )
+        }
+        return AgentToolResult.ok(payload, [exitCode: exitCode])
     }
 
     private static List<String> listArg(Object value) {

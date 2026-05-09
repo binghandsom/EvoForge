@@ -73,6 +73,24 @@ class DeviceMobileController {
     return _publish(session.rejectTask(taskId, note: note));
   }
 
+  Future<DeviceCommandEnvelope> answerCodexQuestion({
+    required String questionId,
+    required String answer,
+    String? questionTaskId,
+    String actor = 'mobile',
+    String? note,
+  }) {
+    return _publish(
+      session.answerCodexQuestion(
+        questionId: questionId,
+        answer: answer,
+        questionTaskId: questionTaskId,
+        actor: actor,
+        note: note,
+      ),
+    );
+  }
+
   List<DeviceTaskSummary> recentTasks({int limit = 50}) {
     return session.recentTasks(limit: limit);
   }

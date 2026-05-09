@@ -38,6 +38,16 @@ class DeviceController {
         return eventStore.listForTask(taskId)
     }
 
+    @GetMapping('tasks/{taskId}/events/page')
+    Map<String, Object> taskEventsPage(@PathVariable('taskId') String taskId,
+                                       @RequestParam(name = 'limit', defaultValue = '80') int limit,
+                                       @RequestParam(name = 'before', required = false) String before,
+                                       @RequestParam(name = 'after', required = false) String after) {
+        return eventStore
+            .listForTaskPage(taskId, Math.max(1, Math.min(limit, 200)), before ?: '', after ?: '')
+            .toMap()
+    }
+
     @GetMapping('tasks')
     List<DeviceTaskSummary> recentTasks(@RequestParam(name = 'limit', defaultValue = '50') int limit) {
         return eventStore.listRecentTasks(Math.max(1, Math.min(limit, 200)))

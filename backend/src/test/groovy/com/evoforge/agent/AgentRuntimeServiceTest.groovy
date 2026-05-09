@@ -1,6 +1,7 @@
 package com.evoforge.agent
 
 import com.evoforge.core.EvoForgeProperties
+import com.evoforge.codex.CodexQuestionBridgeService
 import com.evoforge.device.DeviceEventPublisher
 import com.evoforge.device.DeviceEventSignatureService
 import com.evoforge.device.InMemoryDeviceTaskEventStore
@@ -60,7 +61,10 @@ class AgentRuntimeServiceTest {
             conversations,
             testEventPublisher(),
             new EvoForgeProperties(),
-            new ObjectMapper()
+            new ObjectMapper(),
+            null,
+            null,
+            null
         )
 
         AgentRunResult result = runtime.run('确认当前系统信息', [:])
@@ -107,7 +111,10 @@ class AgentRuntimeServiceTest {
             conversations,
             testEventPublisher(),
             new EvoForgeProperties(),
-            new ObjectMapper()
+            new ObjectMapper(),
+            null,
+            null,
+            null
         )
 
         AgentRunResult result = runtime.run('那这个能力继续按刚才那个思路做', [threadId: 'thread-1'])
@@ -116,6 +123,67 @@ class AgentRuntimeServiceTest {
         assertEquals('thread-1', result.threadId)
         assertTrue(llm.prompts.first().contains('不能硬写死下载目录'))
         assertEquals(['user', 'user', 'assistant'], conversations.recent('thread-1', 10).collect { it.role })
+    }
+
+    @Test
+    void explicitSkillRequestOffersConfirmationAfterBlockedToolEvidence() {
+        AgentKnowledgeService knowledge = new AgentKnowledgeService(new InMemoryKnowledgeStore())
+        AgentConversationMemoryService conversations = new AgentConversationMemoryService(new InMemoryConversationStore())
+        QueueLlm llm = new QueueLlm([
+            '''
+            {
+              "thought": "First verify the previous cache path.",
+              "routes": [
+                {"id":"A","status":"active","rationale":"Check old cache path","next":"resolve path"},
+                {"id":"D","status":"candidate","rationale":"If local cache cannot be located, form a reusable Skill.","next":"形成 WPS 云文档定位与编辑 Skill"}
+              ],
+              "selectedRouteId": "A",
+              "action": {"tool":"path.resolve","args":{"path":"/tmp/evoforge-definitely-missing.docx"}},
+              "finalAnswer": null,
+              "knowledgeWrites": []
+            }
+            ''',
+            '''
+            {
+              "thought": "The cache path is missing, so ask for skill confirmation.",
+              "routes": [
+                {"id":"A","status":"blocked","rationale":"The old cache path is missing","next":"preserve failure"},
+                {"id":"D","status":"active","rationale":"A reusable Skill is needed.","next":"ask user to confirm Skill creation"}
+              ],
+              "selectedRouteId": "D",
+              "action": null,
+              "finalAnswer": "本地缓存路径不存在，无法继续直接编辑。",
+              "knowledgeWrites": []
+            }
+            '''
+        ])
+        AnsweringQuestionBridgeService questionBridge = new AnsweringQuestionBridgeService()
+        AgentRuntimeService runtime = new AgentRuntimeService(
+            new StubModelHub(llm),
+            new AgentToolRegistry([
+                new PathResolveTool(),
+                new KnowledgeSearchTool(knowledge),
+                new KnowledgeUpsertTool(knowledge)
+            ]),
+            knowledge,
+            conversations,
+            testEventPublisher(),
+            new EvoForgeProperties(),
+            new ObjectMapper(),
+            questionBridge,
+            null,
+            null
+        )
+
+        AgentRunResult result = runtime.run(
+            '我想让 EvoForge 自主形成 skill 解决 WPS 云文档缓存丢失问题，只是形成前需要确认。',
+            [taskId: 'task-skill', userId: 'user-1', deviceId: 'pc-1']
+        )
+
+        assertEquals(1, questionBridge.requests.size())
+        assertEquals('agent-skill-proposal', questionBridge.requests.first().requester)
+        assertEquals('skill-service-unavailable', result.stopReason)
+        assertTrue(result.output.contains('skill 创建服务'))
     }
 
     private static class StubModelHub extends ModelHub {
@@ -139,6 +207,31 @@ class AgentRuntimeServiceTest {
             properties,
             new DeviceEventSignatureService(properties)
         )
+    }
+
+    private static class AnsweringQuestionBridgeService extends CodexQuestionBridgeService {
+        final List<Map<String, Object>> requests = []
+
+        AnsweringQuestionBridgeService() {
+            super(
+                new NoopDeviceEventPublisher(
+                    new InMemoryDeviceTaskEventStore(),
+                    new EvoForgeProperties(),
+                    new DeviceEventSignatureService(new EvoForgeProperties())
+                ),
+                new EvoForgeProperties()
+            )
+        }
+
+        @Override
+        Map<String, Object> ask(Map request) {
+            requests << (request as Map<String, Object>)
+            return [
+                answered: true,
+                answer  : '确认创建并继续',
+                actor   : 'unit-test'
+            ] as Map<String, Object>
+        }
     }
 
     private static class QueueLlm implements LlmClient {
